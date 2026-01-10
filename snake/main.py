@@ -4,6 +4,8 @@ import time
 from collections import deque
 from multiprocessing import Process, Queue, Event, Value
 
+from bfs import bfs, safe_move
+
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -31,47 +33,6 @@ HEAD_COLOR = QtGui.QColor(0, 0, 255)
 GREEN = QtGui.QColor(0, 200, 0)
 RED = QtGui.QColor(200, 0, 0)
 BLACK = QtGui.QColor(0, 0, 0)
-
-# ===== BFS 寻路 =====
-def bfs(start, goal, snake):
-    queue = deque([start])
-    visited = {start: None}
-    snake_set = set(snake)
-    while queue:
-        x, y = queue.popleft()
-        if (x, y) == goal:
-            break
-        for dx, dy in [(1,0),(-1,0),(0,1),(0,-1)]:
-            nx, ny = x+dx, y+dy
-            nxt = (nx, ny)
-            if 0 <= nx < GRID_W and 0 <= ny < GRID_H and nxt not in visited and nxt not in snake_set:
-                visited[nxt] = (x, y)
-                queue.append(nxt)
-    if goal not in visited:
-        return None
-    path = []
-    cur = goal
-    while cur != start:
-        path.append(cur)
-        cur = visited[cur]
-    path.reverse()
-    return path
-
-# ===== 安全移动函数 =====
-def safe_move(head, snake):
-    possible = []
-    snake_set = set(snake)
-    for dx, dy in [(1,0), (-1,0), (0,1), (0,-1)]:
-        nx, ny = head[0]+dx, head[1]+dy
-        if 0 <= nx < GRID_W and 0 <= ny < GRID_H and (nx, ny) not in snake_set:
-            tail = snake[0]
-            dist = abs(nx-tail[0]) + abs(ny-tail[1])
-            possible.append(((nx, ny), dist))
-    if possible:
-        possible.sort(key=lambda x: -x[1])
-        return possible[0][0]
-    else:
-        return None
 
 def random_food(snake):
     while True:
@@ -102,11 +63,11 @@ def game_process_main(snake_queue, fruit_queue, stop_event, start_event, speed, 
     # 开始信号触发后，才执行游戏主逻辑
     while not stop_event.is_set():
         head = snake[-1]
-        path = bfs(head, food, snake[:-1])
+        path = bfs(head, food, snake[:-1], GRID_W, GRID_H)
         if path:
             next_cell = path[0]
         else:
-            next_cell = safe_move(head, snake)
+            next_cell = safe_move(head, snake, GRID_W, GRID_H)
             if next_cell is None:
                 # 游戏结束，计算统计数据
                 end_time = time.time()
