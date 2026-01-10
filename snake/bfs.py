@@ -1,4 +1,4 @@
-
+# 小蛇寻路算法模块 BFS 实现
 from collections import deque
 
 def bfs(start, goal, snake, grid_w, grid_h):
