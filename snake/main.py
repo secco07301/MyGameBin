@@ -81,9 +81,11 @@ def random_food(snake):
             return (fx, fy)
 
 # ===== 子进程函数 =====
-def game_process_main(snake_queue, fruit_queue, stop_event, speed, record_queue):  # 新增：record_queue
+def game_process_main(snake_queue, fruit_queue, stop_event, start_event, speed, record_queue):  # 新增：start_event
     snake = [(5,5)]
     food = random_food(snake)
+    # 初始状态先把蛇和食物信息发送到主进程，让界面显示初始画面
+    snake_queue.put({"snake": list(snake), "food": food, "score": 0, "update_snake": True})
     last_time = time.time()
     score = 0
     #snake_id = str(uuid.uuid4())[:8]  # 生成8位短编号
@@ -91,6 +93,13 @@ def game_process_main(snake_queue, fruit_queue, stop_event, speed, record_queue)
     start_time = time.time()  # 单局开始时间
     fruit_times = []  # 存储每个果实的耗时
     
+    # 等待开始信号，这一步让蛇初始处于静止状态
+    while not start_event.is_set() and not stop_event.is_set():
+        time.sleep(0.1)  # 减少CPU占用
+        # 持续发送初始画面，确保界面能显示静止的蛇
+        snake_queue.put({"snake": list(snake), "food": food, "score": 0, "update_snake": True})
+    
+    # 开始信号触发后，才执行游戏主逻辑
     while not stop_event.is_set():
         head = snake[-1]
         path = bfs(head, food, snake[:-1])
@@ -247,7 +256,7 @@ class SnakeGameWidget(QtWidgets.QWidget):
 
 # ===== 主窗口 =====
 class SnakeMainWindow(QtWidgets.QWidget):
-    def __init__(self, snake_queue, fruit_queue, record_queue, stop_event, speed, p_game):  # 新增：record_queue
+    def __init__(self, snake_queue, fruit_queue, record_queue, stop_event, start_event, speed, p_game):  # 新增：start_event
         super().__init__()
         self.setWindowTitle("AI 贪吃蛇 + 折线统计图 (多进程版)")
         self.setGeometry(100,100,GAME_WIDTH+480,HEIGHT+50)
@@ -255,6 +264,7 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.fruit_queue = fruit_queue
         self.record_queue = record_queue  # 新增：保存记录队列
         self.stop_event = stop_event
+        self.start_event = start_event  # 新增：开始事件
         self.speed = speed
         self.p_game = p_game
         
@@ -344,10 +354,12 @@ class SnakeMainWindow(QtWidgets.QWidget):
         speed_layout.addWidget(self.tip_label)
         right_layout.addLayout(speed_layout)
 
-        # 原有按钮布局
+        # 按钮布局（新增开始游戏按钮）
         btn_layout = QtWidgets.QHBoxLayout()
+        self.start_btn = QtWidgets.QPushButton("开始游戏")  # 新增开始按钮
         self.restart_btn = QtWidgets.QPushButton("重新开始")
         self.exit_btn = QtWidgets.QPushButton("退出")
+        btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.restart_btn)
         btn_layout.addWidget(self.exit_btn)
         right_layout.addLayout(btn_layout)
@@ -360,8 +372,14 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.timer.start(200)
 
         # 按钮事件
+        self.start_btn.clicked.connect(self.start_game)  # 绑定开始游戏事件
         self.restart_btn.clicked.connect(self.restart_game)
         self.exit_btn.clicked.connect(self.close)
+
+    def start_game(self):
+        """触发开始事件，让蛇开始移动"""
+        self.start_event.set()
+        self.start_btn.setEnabled(False)  # 开始后禁用按钮，避免重复点击
 
     def update_all(self):
         """更新折线图、统计、排名表格"""
@@ -440,9 +458,13 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.average_label.setText("平均耗时：0.00 秒")
         self.stats_label.setText("低于平均：0 个 | 高于平均：0 个")
 
-        # 重启子进程（传入record_queue）
+        # 重置开始事件
+        self.start_event.clear()
+        self.start_btn.setEnabled(True)  # 重新启用开始按钮
+
+        # 重启子进程（传入start_event）
         self.stop_event.clear()
-        self.p_game = Process(target=game_process_main, args=(self.snake_queue, self.fruit_queue, self.stop_event, self.speed, self.record_queue))
+        self.p_game = Process(target=game_process_main, args=(self.snake_queue, self.fruit_queue, self.stop_event, self.start_event, self.speed, self.record_queue))
         self.p_game.start()
         
         # 重置提示标签
@@ -465,14 +487,15 @@ if __name__=="__main__":
     fruit_queue = Queue()
     record_queue = Queue()  # 新增：记录队列
     stop_event = Event()
+    start_event = Event()  # 新增：开始事件（初始为未触发状态）
     speed = Value('i', 10)
 
-    # 启动游戏进程（传入record_queue）
-    p_game = Process(target=game_process_main, args=(snake_queue, fruit_queue, stop_event, speed, record_queue))
+    # 启动游戏进程（传入start_event）
+    p_game = Process(target=game_process_main, args=(snake_queue, fruit_queue, stop_event, start_event, speed, record_queue))
     p_game.start()
 
     app = QtWidgets.QApplication(sys.argv)
-    # 主窗口传入record_queue
-    window = SnakeMainWindow(snake_queue, fruit_queue, record_queue, stop_event, speed, p_game)
+    # 主窗口传入start_event
+    window = SnakeMainWindow(snake_queue, fruit_queue, record_queue, stop_event, start_event, speed, p_game)
     window.show()
     sys.exit(app.exec_())
