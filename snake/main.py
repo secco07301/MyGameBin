@@ -5,6 +5,8 @@ from collections import deque
 from multiprocessing import Process, Queue, Event, Value
 
 from bfs import bfs, safe_move
+from dfs import dfs
+from dfs import safe_move as dfs_safe_move
 
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
@@ -62,25 +64,30 @@ def game_process_main(snake_queue, fruit_queue, stop_event, start_event, speed, 
     # 开始信号触发后，才执行游戏主逻辑
     while not stop_event.is_set():
         head = snake[-1]
-        path = bfs(head, food, snake[:-1], GRID_W, GRID_H)
-        if path:
-            next_cell = path[0]
+        if algorithm == "BFS":
+            path = bfs(head, food, snake[:-1], GRID_W, GRID_H)
+            next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
+        elif algorithm == "DFS":
+            path = dfs(head, food, snake[:-1], GRID_W, GRID_H)
+            next_cell = dfs_safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
         else:
-            next_cell = safe_move(head, snake, GRID_W, GRID_H)
-            if next_cell is None:
-                # 游戏结束，计算统计数据
-                end_time = time.time()
-                total_time = round(end_time - start_time, 2)   # 总耗时
-                avg_time = round(np.mean(fruit_times), 2) if fruit_times else 0.0  # 平均耗时
-                # 发送记录到主进程（替代全局变量）
-                record_queue.put({
-                    "snake_id": snake_id,
-                    "score": score,
-                    "total_time": total_time,
-                    "avg_time": avg_time
-                })
-                print(f"Game Over! Score: {score}")
-                break
+            path = bfs(head, food, snake[:-1], GRID_W, GRID_H)  # 默认回退到BFS
+            next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
+        
+        if next_cell is None:
+            # 游戏结束，计算统计数据
+            end_time = time.time()
+            total_time = round(end_time - start_time, 2)   # 总耗时
+            avg_time = round(np.mean(fruit_times), 2) if fruit_times else 0.0  # 平均耗时
+            # 发送记录到主进程（替代全局变量）
+            record_queue.put({
+                "snake_id": snake_id,
+                "score": score,
+                "total_time": total_time,
+                "avg_time": avg_time
+            })
+            print(f"Game Over! Score: {score}")
+            break
 
         snake.append(next_cell)
         if next_cell == food:
@@ -229,7 +236,7 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.p_game = p_game
         
         # 新增：算法列表和当前选中算法
-        self.algorithms = ["BFS"]  # 可扩展添加其他算法（如DFS、A*等）
+        self.algorithms = ["BFS", "DFS"]  # 可扩展添加其他算法（如DFS、A*等）
         self.current_algorithm = self.algorithms[0]  # 默认选中BFS
         
         # 新增：主进程维护游戏记录（替代全局变量）
