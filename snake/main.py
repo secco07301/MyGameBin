@@ -42,15 +42,14 @@ def random_food(snake):
             return (fx, fy)
 
 # ===== 子进程函数 =====
-def game_process_main(snake_queue, fruit_queue, stop_event, start_event, speed, record_queue):  # 新增：start_event
+def game_process_main(snake_queue, fruit_queue, stop_event, start_event, speed, record_queue, algorithm):  # 新增：algorithm参数
     snake = [(5,5)]
     food = random_food(snake)
     # 初始状态先把蛇和食物信息发送到主进程，让界面显示初始画面
     snake_queue.put({"snake": list(snake), "food": food, "score": 0, "update_snake": True})
     last_time = time.time()
     score = 0
-    #snake_id = str(uuid.uuid4())[:8]  # 生成8位短编号
-    snake_id = "BFS"  # 固定编号为BFS
+    snake_id = algorithm  # 使用选中的算法名称作为蛇编号
     start_time = time.time()  # 单局开始时间
     fruit_times = []  # 存储每个果实的耗时
     
@@ -217,7 +216,7 @@ class SnakeGameWidget(QtWidgets.QWidget):
 
 # ===== 主窗口 =====
 class SnakeMainWindow(QtWidgets.QWidget):
-    def __init__(self, snake_queue, fruit_queue, record_queue, stop_event, start_event, speed, p_game):  # 新增：start_event
+    def __init__(self, snake_queue, fruit_queue, record_queue, stop_event, start_event, speed, p_game):
         super().__init__()
         self.setWindowTitle("AI 贪吃蛇 + 折线统计图 (多进程版)")
         self.setGeometry(100,100,GAME_WIDTH+480,HEIGHT+50)
@@ -228,6 +227,10 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.start_event = start_event  # 新增：开始事件
         self.speed = speed
         self.p_game = p_game
+        
+        # 新增：算法列表和当前选中算法
+        self.algorithms = ["BFS"]  # 可扩展添加其他算法（如DFS、A*等）
+        self.current_algorithm = self.algorithms[0]  # 默认选中BFS
         
         # 新增：主进程维护游戏记录（替代全局变量）
         self.game_records = []
@@ -246,6 +249,27 @@ class SnakeMainWindow(QtWidgets.QWidget):
         right_layout.setContentsMargins(20, 20, 20, 20)  # 可选：添加内边距，避免边缘挤压
         right_layout.setSpacing(10)  # 控件间间距，让折线图和表格之间有留白
 
+        # 新增：算法选择下拉框
+        algo_layout = QtWidgets.QHBoxLayout()
+        algo_label = QtWidgets.QLabel("循迹算法：")
+        algo_label.setFont(QtGui.QFont('Arial', 10))
+        algo_layout.addWidget(algo_label)
+        
+        self.algo_combobox = QtWidgets.QComboBox()
+        self.algo_combobox.addItems(self.algorithms)
+        self.algo_combobox.setFixedWidth(120)
+        # 绑定算法选择事件
+        self.algo_combobox.currentTextChanged.connect(self.on_algorithm_change)
+        algo_layout.addWidget(self.algo_combobox)
+        
+        # 提示标签
+        algo_tip = QtWidgets.QLabel("（选择蛇的寻路算法）")
+        algo_tip.setFont(QtGui.QFont('Arial', 8))
+        algo_tip.setStyleSheet("color: gray;")
+        algo_layout.addWidget(algo_tip)
+        
+        right_layout.addLayout(algo_layout)
+
         # 折线图
         self.plot_canvas = SnakePlotCanvas(self)
         # 移除固定宽度，改为设置最小宽度（避免缩太窄）
@@ -262,7 +286,7 @@ class SnakeMainWindow(QtWidgets.QWidget):
         # 排名表格
         self.rank_table = QtWidgets.QTableWidget()
         self.rank_table.setColumnCount(5)
-        self.rank_table.setHorizontalHeaderLabels(["排名", "蛇的编号", "得分", "总耗时(s)", "平均耗时(s)"])
+        self.rank_table.setHorizontalHeaderLabels(["排名", "算法名称", "得分", "总耗时(s)", "平均耗时(s)"])  # 修改表头为"算法名称"
         self.rank_table.verticalHeader().setVisible(False)
         self.rank_table.setMinimumWidth(400)  # 和折线图最小宽度一致
         self.rank_table.setMaximumWidth(800)  # 和折线图最大宽度一致
@@ -272,7 +296,6 @@ class SnakeMainWindow(QtWidgets.QWidget):
             QtWidgets.QSizePolicy.Fixed       # 垂直固定高度
         )
         self.rank_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-        #self.rank_table.setFixedSize(450, 180)
         self.rank_table.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
         self.rank_table.setColumnWidth(0, 60)
         self.rank_table.setColumnWidth(1, 100)
@@ -337,10 +360,17 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.restart_btn.clicked.connect(self.restart_game)
         self.exit_btn.clicked.connect(self.close)
 
+    def on_algorithm_change(self, text):
+        """算法选择变更事件"""
+        self.current_algorithm = text
+        # 重新开始游戏以应用新算法
+        self.restart_game()
+
     def start_game(self):
         """触发开始事件，让蛇开始移动"""
         self.start_event.set()
         self.start_btn.setEnabled(False)  # 开始后禁用按钮，避免重复点击
+        self.algo_combobox.setEnabled(False)  # 开始后禁用算法选择框，避免中途修改
 
     def update_all(self):
         """更新折线图、统计、排名表格"""
@@ -373,7 +403,7 @@ class SnakeMainWindow(QtWidgets.QWidget):
             self.rank_table.insertRow(row_idx)
             # 排名
             self.rank_table.setItem(row_idx, 0, QtWidgets.QTableWidgetItem(str(row_idx+1)))
-            # 蛇编号
+            # 算法名称（原蛇编号）
             self.rank_table.setItem(row_idx, 1, QtWidgets.QTableWidgetItem(record["snake_id"]))
             # 得分
             self.rank_table.setItem(row_idx, 2, QtWidgets.QTableWidgetItem(str(record["score"])))
@@ -422,10 +452,14 @@ class SnakeMainWindow(QtWidgets.QWidget):
         # 重置开始事件
         self.start_event.clear()
         self.start_btn.setEnabled(True)  # 重新启用开始按钮
+        self.algo_combobox.setEnabled(True)  # 重新启用算法选择框
 
-        # 重启子进程（传入start_event）
+        # 重启子进程（传入选中的算法）
         self.stop_event.clear()
-        self.p_game = Process(target=game_process_main, args=(self.snake_queue, self.fruit_queue, self.stop_event, self.start_event, self.speed, self.record_queue))
+        self.p_game = Process(
+            target=game_process_main, 
+            args=(self.snake_queue, self.fruit_queue, self.stop_event, self.start_event, self.speed, self.record_queue, self.current_algorithm)
+        )
         self.p_game.start()
         
         # 重置提示标签
@@ -451,8 +485,11 @@ if __name__=="__main__":
     start_event = Event()  # 新增：开始事件（初始为未触发状态）
     speed = Value('i', 10)
 
-    # 启动游戏进程（传入start_event）
-    p_game = Process(target=game_process_main, args=(snake_queue, fruit_queue, stop_event, start_event, speed, record_queue))
+    # 启动游戏进程（传入默认算法BFS）
+    p_game = Process(
+        target=game_process_main, 
+        args=(snake_queue, fruit_queue, stop_event, start_event, speed, record_queue, "BFS")
+    )
     p_game.start()
 
     app = QtWidgets.QApplication(sys.argv)
