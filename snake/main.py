@@ -15,6 +15,9 @@ import matplotlib
 matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial']  # 黑体/备用字体
 matplotlib.rcParams['axes.unicode_minus'] = False  # 解决负号显示为方块的问题
 
+# ===== 新增：游戏记录存储 =====
+import uuid  # 需在import区新增该导入
+game_records = []  # 存储格式：{"snake_id": 蛇唯一编号, "score": 得分, "total_time": 总耗时, "avg_time": 平均耗时}
 # ===== 游戏参数 =====
 GAME_WIDTH, HEIGHT = 600, 400
 BLOCK = 20
@@ -78,11 +81,16 @@ def random_food(snake):
             return (fx, fy)
 
 # ===== 子进程函数 =====
-def game_process_main(snake_queue, fruit_queue, stop_event, speed):
+def game_process_main(snake_queue, fruit_queue, stop_event, speed, record_queue):  # 新增：record_queue
     snake = [(5,5)]
     food = random_food(snake)
     last_time = time.time()
     score = 0
+    #snake_id = str(uuid.uuid4())[:8]  # 生成8位短编号
+    snake_id = "BFS"  # 固定编号为BFS
+    start_time = time.time()  # 单局开始时间
+    fruit_times = []  # 存储每个果实的耗时
+    
     while not stop_event.is_set():
         head = snake[-1]
         path = bfs(head, food, snake[:-1])
@@ -91,6 +99,17 @@ def game_process_main(snake_queue, fruit_queue, stop_event, speed):
         else:
             next_cell = safe_move(head, snake)
             if next_cell is None:
+                # 游戏结束，计算统计数据
+                end_time = time.time()
+                total_time = round(end_time - start_time, 2)   # 总耗时
+                avg_time = round(np.mean(fruit_times), 2) if fruit_times else 0.0  # 平均耗时
+                # 发送记录到主进程（替代全局变量）
+                record_queue.put({
+                    "snake_id": snake_id,
+                    "score": score,
+                    "total_time": total_time,
+                    "avg_time": avg_time
+                })
                 print(f"Game Over! Score: {score}")
                 break
 
@@ -100,13 +119,13 @@ def game_process_main(snake_queue, fruit_queue, stop_event, speed):
             now = time.time()
             delta = now - last_time
             last_time = now
+            fruit_times.append(delta)  # 新增：记录单次耗时
             fruit_queue.put({"fruit": score, "time": delta})
             food = random_food(snake)
         else:
             snake.pop(0)
 
         snake_queue.put({"snake": list(snake), "food": food, "score": score, "update_snake": True})
-        # 使用共享变量中的速度值
         time.sleep(1/speed.value)
 
 # ===== matplotlib 绘图 =====
@@ -228,23 +247,26 @@ class SnakeGameWidget(QtWidgets.QWidget):
 
 # ===== 主窗口 =====
 class SnakeMainWindow(QtWidgets.QWidget):
-    def __init__(self, snake_queue, fruit_queue, stop_event, speed, p_game):
+    def __init__(self, snake_queue, fruit_queue, record_queue, stop_event, speed, p_game):  # 新增：record_queue
         super().__init__()
         self.setWindowTitle("AI 贪吃蛇 + 折线统计图 (多进程版)")
-        # 调整主窗口尺寸，给新增控件留出空间
         self.setGeometry(100,100,GAME_WIDTH+480,HEIGHT+50)
         self.snake_queue = snake_queue
         self.fruit_queue = fruit_queue
+        self.record_queue = record_queue  # 新增：保存记录队列
         self.stop_event = stop_event
-        self.speed = speed  # 共享速度变量
+        self.speed = speed
         self.p_game = p_game
+        
+        # 新增：主进程维护游戏记录（替代全局变量）
+        self.game_records = []
 
         # ===== 主布局 =====
         main_layout = QtWidgets.QHBoxLayout(self)
 
         # 游戏 Widget
         self.game_widget = SnakeGameWidget(snake_queue, self)
-        main_layout.addWidget(self.game_widget, 3)  # 左边占3份空间
+        main_layout.addWidget(self.game_widget, 3)
 
         # 右侧布局（垂直）
         right_layout = QtWidgets.QVBoxLayout()
@@ -253,13 +275,29 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.plot_canvas = SnakePlotCanvas(self)
         right_layout.addWidget(self.plot_canvas, alignment=QtCore.Qt.AlignCenter)
 
+        # 排名表格
+        self.rank_table = QtWidgets.QTableWidget()
+        self.rank_table.setColumnCount(5)
+        self.rank_table.setHorizontalHeaderLabels(["排名", "蛇的编号", "得分", "总耗时(s)", "平均耗时(s)"])
+        self.rank_table.verticalHeader().setVisible(False)
+        self.rank_table.setFixedSize(450, 180)
+        self.rank_table.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
+        self.rank_table.setColumnWidth(0, 60)
+        self.rank_table.setColumnWidth(1, 100)
+        self.rank_table.setColumnWidth(2, 60)
+        self.rank_table.setColumnWidth(3, 80)
+        self.rank_table.setColumnWidth(4, 80)
+        self.rank_table.setAlternatingRowColors(True)
+        self.rank_table.setStyleSheet("alternate-background-color: #f5f5f5;")
+        right_layout.addWidget(self.rank_table, alignment=QtCore.Qt.AlignCenter)
+
         # 平均时间显示标签
         self.average_label = QtWidgets.QLabel("平均耗时：0.00 秒")
         self.average_label.setFont(QtGui.QFont('Arial', 10, QtGui.QFont.Bold))
         self.average_label.setAlignment(QtCore.Qt.AlignCenter)
         right_layout.addWidget(self.average_label)
 
-        # 新增：统计结果显示标签（一行显示，更紧凑）
+        # 统计结果显示标签
         self.stats_label = QtWidgets.QLabel("低于平均：0 个 | 高于平均：0 个")
         self.stats_label.setFont(QtGui.QFont('Arial', 10))
         self.stats_label.setStyleSheet("color: #333333;")
@@ -268,27 +306,21 @@ class SnakeMainWindow(QtWidgets.QWidget):
 
         # 速度控制区域
         speed_layout = QtWidgets.QHBoxLayout()
-        # 速度标签
         speed_label = QtWidgets.QLabel("蛇移动速度：")
         speed_label.setFont(QtGui.QFont('Arial', 10))
         speed_layout.addWidget(speed_label)
-        # 速度输入框
         self.speed_input = QtWidgets.QLineEdit()
         self.speed_input.setPlaceholderText("输入数字（如100）")
         self.speed_input.setFixedWidth(80)
-        # 初始显示当前速度
         self.speed_input.setText(str(self.speed.value))
         speed_layout.addWidget(self.speed_input)
-        # 确认按钮
         self.confirm_btn = QtWidgets.QPushButton("确认")
         self.confirm_btn.clicked.connect(self.update_speed)
         speed_layout.addWidget(self.confirm_btn)
-        # 提示标签
         self.tip_label = QtWidgets.QLabel("（数值越大速度越快）")
         self.tip_label.setFont(QtGui.QFont('Arial', 8))
         self.tip_label.setStyleSheet("color: gray;")
         speed_layout.addWidget(self.tip_label)
-        # 将速度布局添加到右侧布局
         right_layout.addLayout(speed_layout)
 
         # 原有按钮布局
@@ -299,80 +331,104 @@ class SnakeMainWindow(QtWidgets.QWidget):
         btn_layout.addWidget(self.exit_btn)
         right_layout.addLayout(btn_layout)
 
-        # 右边占2份空间
         main_layout.addLayout(right_layout, 2)
 
-        # 定时更新折线图和统计信息
+        # 定时更新折线图、统计信息、排名表格
         self.timer = QtCore.QTimer()
-        self.timer.timeout.connect(self.update_plot)
+        self.timer.timeout.connect(self.update_all)  # 合并更新逻辑
         self.timer.start(200)
 
         # 按钮事件
         self.restart_btn.clicked.connect(self.restart_game)
         self.exit_btn.clicked.connect(self.close)
 
+    def update_all(self):
+        """更新折线图、统计、排名表格"""
+        # 1. 更新折线图数据
+        while not self.fruit_queue.empty():
+            data = self.fruit_queue.get()
+            self.plot_canvas.times.append(data["time"])
+        self.plot_canvas.update_plot()
+        
+        # 2. 更新平均时间和统计标签
+        self.average_label.setText(f"平均耗时：{self.plot_canvas.average_time:.2f} 秒")
+        self.stats_label.setText(f"低于平均：{self.plot_canvas.below_average} 个 | 高于平均：{self.plot_canvas.above_average} 个")
+        
+        # 3. 接收子进程的游戏记录并更新表格
+        while not self.record_queue.empty():
+            record = self.record_queue.get()
+            self.game_records.append(record)
+            # 按得分降序、平均耗时升序排序
+            self.game_records.sort(key=lambda x: (-x["score"], x["avg_time"]))
+        
+        # 4. 更新排名表格
+        self.update_rank_table()
+
+    def update_rank_table(self):
+        """更新排名表格"""
+        # 清空原有行
+        self.rank_table.setRowCount(0)
+        # 填充新数据
+        for row_idx, record in enumerate(self.game_records):
+            self.rank_table.insertRow(row_idx)
+            # 排名
+            self.rank_table.setItem(row_idx, 0, QtWidgets.QTableWidgetItem(str(row_idx+1)))
+            # 蛇编号
+            self.rank_table.setItem(row_idx, 1, QtWidgets.QTableWidgetItem(record["snake_id"]))
+            # 得分
+            self.rank_table.setItem(row_idx, 2, QtWidgets.QTableWidgetItem(str(record["score"])))
+            # 总耗时
+            self.rank_table.setItem(row_idx, 3, QtWidgets.QTableWidgetItem(str(record["total_time"])))
+            # 平均耗时
+            self.rank_table.setItem(row_idx, 4, QtWidgets.QTableWidgetItem(str(record["avg_time"])))
+
     def update_speed(self):
         """更新蛇的移动速度"""
         try:
-            # 获取输入的速度值
             new_speed = int(self.speed_input.text())
             if new_speed <= 0:
                 self.tip_label.setText("❌ 速度必须大于0")
                 self.tip_label.setStyleSheet("color: red;")
                 return
-            # 更新共享变量（子进程会实时读取）
             self.speed.value = new_speed
-            # 提示成功
             self.tip_label.setText(f"✅ 速度已设为{new_speed}")
             self.tip_label.setStyleSheet("color: green;")
         except ValueError:
-            # 输入非数字的提示
             self.tip_label.setText("❌ 请输入有效数字")
             self.tip_label.setStyleSheet("color: red;")
 
-    def update_plot(self):
-        while not self.fruit_queue.empty():
-            data = self.fruit_queue.get()
-            self.plot_canvas.times.append(data["time"])
-        # 刷新图表
-        self.plot_canvas.update_plot()
-        # 更新平均时间显示
-        self.average_label.setText(f"平均耗时：{self.plot_canvas.average_time:.2f} 秒")
-        # 新增：更新统计结果显示
-        self.stats_label.setText(f"低于平均：{self.plot_canvas.below_average} 个 | 高于平均：{self.plot_canvas.above_average} 个")
-
-    # ===== 重新开始游戏 =====
     def restart_game(self):
-        # 先关闭原来的子进程
+        """重新开始游戏"""
+        # 停止子进程
         self.stop_event.set()
         if self.p_game.is_alive():
             self.p_game.join(timeout=2)
 
-        # 清空队列和折线图
+        # 清空队列和数据
         while not self.snake_queue.empty():
             self.snake_queue.get()
         while not self.fruit_queue.empty():
             self.fruit_queue.get()
+        while not self.record_queue.empty():  # 新增：清空记录队列
+            self.record_queue.get()
+        
         self.plot_canvas.times.clear()
-        # 重置统计相关值
         self.plot_canvas.average_time = 0.0
         self.plot_canvas.below_average = 0
         self.plot_canvas.above_average = 0
-        # 重置显示标签
         self.average_label.setText("平均耗时：0.00 秒")
         self.stats_label.setText("低于平均：0 个 | 高于平均：0 个")
 
-        # 重置事件和子进程（传入速度共享变量）
+        # 重启子进程（传入record_queue）
         self.stop_event.clear()
-        self.p_game = Process(target=game_process_main, args=(self.snake_queue, self.fruit_queue, self.stop_event, self.speed))
+        self.p_game = Process(target=game_process_main, args=(self.snake_queue, self.fruit_queue, self.stop_event, self.speed, self.record_queue))
         self.p_game.start()
+        
         # 重置提示标签
         self.tip_label.setText("（数值越大速度越快）")
         self.tip_label.setStyleSheet("color: gray;")
-        # 重置输入框为当前速度
         self.speed_input.setText(str(self.speed.value))
 
-    # ===== 关闭窗口 =====
     def closeEvent(self, event):
         self.stop_event.set()
         if self.p_game.is_alive():
@@ -386,16 +442,16 @@ if __name__=="__main__":
 
     snake_queue = Queue()
     fruit_queue = Queue()
+    record_queue = Queue()  # 新增：记录队列
     stop_event = Event()
+    speed = Value('i', 10)
 
-    # 创建共享速度变量
-    speed = Value('i', 10)  # 初始速度10
-
-    # 启动游戏进程（传入速度共享变量）
-    p_game = Process(target=game_process_main, args=(snake_queue, fruit_queue, stop_event, speed))
+    # 启动游戏进程（传入record_queue）
+    p_game = Process(target=game_process_main, args=(snake_queue, fruit_queue, stop_event, speed, record_queue))
     p_game.start()
 
     app = QtWidgets.QApplication(sys.argv)
-    window = SnakeMainWindow(snake_queue, fruit_queue, stop_event, speed, p_game)
+    # 主窗口传入record_queue
+    window = SnakeMainWindow(snake_queue, fruit_queue, record_queue, stop_event, speed, p_game)
     window.show()
     sys.exit(app.exec_())
