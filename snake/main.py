@@ -270,17 +270,38 @@ class SnakeMainWindow(QtWidgets.QWidget):
 
         # 右侧布局（垂直）
         right_layout = QtWidgets.QVBoxLayout()
+        # 新增：设置布局水平居中，且子控件拉伸填满宽度
+        right_layout.setAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+        right_layout.setContentsMargins(20, 20, 20, 20)  # 可选：添加内边距，避免边缘挤压
+        right_layout.setSpacing(10)  # 控件间间距，让折线图和表格之间有留白
 
         # 折线图
         self.plot_canvas = SnakePlotCanvas(self)
-        right_layout.addWidget(self.plot_canvas, alignment=QtCore.Qt.AlignCenter)
+        # 移除固定宽度，改为设置最小宽度（避免缩太窄）
+        self.plot_canvas.setMinimumWidth(400)  # 最小宽度400px，可按需调整
+        self.plot_canvas.setMaximumWidth(800)  # 可选：限制最大宽度，避免太宽
+        self.plot_canvas.setFixedHeight(220)   # 高度固定，宽度自适应
+        # 关键：让折线图的画布拉伸填满父布局宽度
+        self.plot_canvas.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,  # 水平方向自适应拉伸
+            QtWidgets.QSizePolicy.Fixed       # 垂直方向固定高度
+        )
+        right_layout.addWidget(self.plot_canvas)
 
         # 排名表格
         self.rank_table = QtWidgets.QTableWidget()
         self.rank_table.setColumnCount(5)
         self.rank_table.setHorizontalHeaderLabels(["排名", "蛇的编号", "得分", "总耗时(s)", "平均耗时(s)"])
         self.rank_table.verticalHeader().setVisible(False)
-        self.rank_table.setFixedSize(450, 180)
+        self.rank_table.setMinimumWidth(400)  # 和折线图最小宽度一致
+        self.rank_table.setMaximumWidth(800)  # 和折线图最大宽度一致
+        self.rank_table.setFixedHeight(180)   # 高度固定，宽度自适应
+        self.rank_table.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding,  # 水平自适应拉伸
+            QtWidgets.QSizePolicy.Fixed       # 垂直固定高度
+        )
+        self.rank_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+        #self.rank_table.setFixedSize(450, 180)
         self.rank_table.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
         self.rank_table.setColumnWidth(0, 60)
         self.rank_table.setColumnWidth(1, 100)
@@ -289,7 +310,7 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.rank_table.setColumnWidth(4, 80)
         self.rank_table.setAlternatingRowColors(True)
         self.rank_table.setStyleSheet("alternate-background-color: #f5f5f5;")
-        right_layout.addWidget(self.rank_table, alignment=QtCore.Qt.AlignCenter)
+        right_layout.addWidget(self.rank_table)
 
         # 平均时间显示标签
         self.average_label = QtWidgets.QLabel("平均耗时：0.00 秒")
