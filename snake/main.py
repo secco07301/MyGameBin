@@ -9,6 +9,7 @@ from dfs import dfs
 from dfs import safe_move as dfs_safe_move
 from A import a_star
 from dijkstra import dijkstra_snake_path
+from greedy import greedy_snake_path
 
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
@@ -77,6 +78,9 @@ def game_process_main(snake_queue, fruit_queue, stop_event, start_event, speed, 
             next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
         elif algorithm == "Dijkstra":
             path = dijkstra_snake_path(head, food, snake[:-1], GRID_W, GRID_H)
+            next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
+        elif algorithm == "Greedy":
+            path = greedy_snake_path(head, food, snake[:-1], GRID_W, GRID_H)
             next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
         else:
             path = bfs(head, food, snake[:-1], GRID_W, GRID_H)  # 默认回退到BFS
@@ -244,7 +248,7 @@ class SnakeMainWindow(QtWidgets.QWidget):
         self.p_game = p_game
         
         # 新增：算法列表和当前选中算法
-        self.algorithms = ["BFS", "DFS", "A*", "Dijkstra"]  # 可扩展添加其他算法（如DFS、A*等）
+        self.algorithms = ["BFS", "DFS", "A*", "Dijkstra", "Greedy"]  # 可扩展添加其他算法（如DFS、A*等）
         self.current_algorithm = self.algorithms[0]  # 默认选中BFS
         
         # 新增：主进程维护游戏记录（替代全局变量）
