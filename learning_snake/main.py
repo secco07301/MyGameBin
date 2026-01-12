@@ -61,6 +61,8 @@ Q_TABLE_PATH = "snake_q_table.pkl"
 BEST_Q_TABLE_PATH = "snake_best_q_table.pkl"
 # 最优得分记录文件
 BEST_SCORE_PATH = "best_score_record.txt"
+# 新增：最优参数保存路径
+BEST_PARAMS_PATH = "snake_best_params.pkl"
 
 # 图表显示参数
 PLOT_VIEW_WIDTH = 50  # 每次显示50个数据点
@@ -75,10 +77,18 @@ class QLearningAgent:
         self.epsilon = DEFAULT_EPSILON  
         # 初始化最优得分记录
         self.best_score = self.load_best_score()
+        # 初始化最优参数
+        self.best_params = {
+            "alpha": DEFAULT_ALPHA,
+            "gamma": DEFAULT_GAMMA,
+            "epsilon": DEFAULT_EPSILON
+        }
         # 加载最新Q表（训练中使用）
         self.load_q_table()
         # 加载最优Q表（初始时如果有则使用）
         self.load_best_q_table()
+        # 新增：加载最优参数
+        self.load_best_params()
 
     def choose_action(self, state):
         """选择动作（集成安全移动逻辑）"""
@@ -162,11 +172,13 @@ class QLearningAgent:
             best_q_table_dict = dict(self.q_table)
             with open(BEST_Q_TABLE_PATH, 'wb') as f:
                 pickle.dump(best_q_table_dict, f)
+            # 新增：保存当前参数作为最优参数
+            self.save_best_params()
             # 保存最优得分记录（便于查看）
             self.save_best_score()
             # 打印日志
             exp_count = len(self.q_table)
-            print(f"🎉 发现最优成果！得分：{self.best_score} | Q表经验数：{exp_count} | 已保存到 {BEST_Q_TABLE_PATH}")
+            print(f"🎉 发现最优成果！得分：{self.best_score} | Q表经验数：{exp_count} | 最优参数：α={self.alpha:.2f}, γ={self.gamma:.2f}, ε={self.epsilon:.2f} | 已保存到 {BEST_Q_TABLE_PATH} & {BEST_PARAMS_PATH}")
             return True
         return False
 
@@ -179,6 +191,30 @@ class QLearningAgent:
             print(f"📌 加载最优Q表 | 历史最优得分：{self.best_score} | 经验数：{len(best_q_table_dict)}")
             return len(best_q_table_dict)
         return 0
+
+    # 新增：保存最优参数
+    def save_best_params(self):
+        """保存当前参数作为最优参数"""
+        self.best_params = {
+            "alpha": self.alpha,
+            "gamma": self.gamma,
+            "epsilon": self.epsilon,
+            "score": self.best_score  # 关联得分，便于追溯
+        }
+        with open(BEST_PARAMS_PATH, 'wb') as f:
+            pickle.dump(self.best_params, f)
+        print(f"📌 保存最优参数 | α={self.alpha:.2f}, γ={self.gamma:.2f}, ε={self.epsilon:.2f} | 已保存到 {BEST_PARAMS_PATH}")
+
+    # 新增：加载最优参数
+    def load_best_params(self):
+        """加载最优参数（程序启动时）"""
+        if os.path.exists(BEST_PARAMS_PATH):
+            with open(BEST_PARAMS_PATH, 'rb') as f:
+                self.best_params = pickle.load(f)
+            # 打印加载日志
+            print(f"📌 加载最优参数 | α={self.best_params['alpha']:.2f}, γ={self.best_params['gamma']:.2f}, ε={self.best_params['epsilon']:.2f} | 对应得分：{self.best_params.get('score', 0)}")
+            return self.best_params
+        return None
 
     def save_best_score(self):
         """保存最优得分到文件"""
@@ -201,7 +237,7 @@ class QLearningAgent:
         self.alpha = DEFAULT_ALPHA
         self.gamma = DEFAULT_GAMMA
         self.epsilon = DEFAULT_EPSILON
-        # 重置时仅删除当前训练的Q表，保留最优Q表和最优得分记录
+        # 重置时仅删除当前训练的Q表，保留最优Q表、最优得分和最优参数
         if os.path.exists(Q_TABLE_PATH):
             os.remove(Q_TABLE_PATH)
         # 不删除最优成果文件
@@ -514,13 +550,18 @@ class SnakeRLMainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(left_widget)
 
-        # 状态信息栏
+        # 状态信息栏 - 扩展：显示最优参数
         status_bar_widget = QWidget()
-        status_bar_widget.setFixedHeight(50)
-        status_bar_layout = QHBoxLayout(status_bar_widget)
-        status_bar_layout.setSpacing(20)
+        status_bar_widget.setFixedHeight(80)  # 增高以容纳参数显示
+        status_bar_layout = QVBoxLayout(status_bar_widget)
+        status_bar_layout.setSpacing(5)
         status_bar_layout.setContentsMargins(10, 0, 10, 0)
         status_bar_layout.setAlignment(Qt.AlignCenter)
+
+        # 第一行：得分和进度
+        score_progress_layout = QHBoxLayout()
+        score_progress_layout.setSpacing(20)
+        score_progress_layout.setAlignment(Qt.AlignCenter)
 
         # 当前得分
         current_score_label = QLabel("当前得分：")
@@ -543,13 +584,35 @@ class SnakeRLMainWindow(QMainWindow):
         self.progress_value.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
         self.progress_value.setStyleSheet("color: #2196F3;")
 
+        score_progress_layout.addWidget(current_score_label)
+        score_progress_layout.addWidget(self.current_score_value)
+        score_progress_layout.addWidget(best_score_label)
+        score_progress_layout.addWidget(self.best_score_value)
+        score_progress_layout.addWidget(progress_label)
+        score_progress_layout.addWidget(self.progress_value)
+
+        # 第二行：最优参数显示
+        best_params_layout = QHBoxLayout()
+        best_params_layout.setSpacing(15)
+        best_params_layout.setAlignment(Qt.AlignCenter)
+
+        best_params_label = QLabel("最优参数：")
+        best_params_label.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
+        self.best_alpha_value = QLabel(f"α={self.agent.best_params['alpha']:.2f}")
+        self.best_alpha_value.setFont(QFont("Microsoft YaHei", 11))
+        self.best_gamma_value = QLabel(f"γ={self.agent.best_params['gamma']:.2f}")
+        self.best_gamma_value.setFont(QFont("Microsoft YaHei", 11))
+        self.best_epsilon_value = QLabel(f"ε={self.agent.best_params['epsilon']:.2f}")
+        self.best_epsilon_value.setFont(QFont("Microsoft YaHei", 11))
+
+        best_params_layout.addWidget(best_params_label)
+        best_params_layout.addWidget(self.best_alpha_value)
+        best_params_layout.addWidget(self.best_gamma_value)
+        best_params_layout.addWidget(self.best_epsilon_value)
+
         # 添加到状态栏布局
-        status_bar_layout.addWidget(current_score_label)
-        status_bar_layout.addWidget(self.current_score_value)
-        status_bar_layout.addWidget(best_score_label)
-        status_bar_layout.addWidget(self.best_score_value)
-        status_bar_layout.addWidget(progress_label)
-        status_bar_layout.addWidget(self.progress_value)
+        status_bar_layout.addLayout(score_progress_layout)
+        status_bar_layout.addLayout(best_params_layout)
 
         # 游戏显示标签
         self.game_label = QLabel()
@@ -605,8 +668,19 @@ class SnakeRLMainWindow(QMainWindow):
         """)
         self.cancel_btn.clicked.connect(self.cancel_params)
         
+        # ========== 新增：使用最优成果训练按钮 ==========
+        self.use_best_btn = QPushButton("使用最优成果训练")
+        self.use_best_btn.setFixedSize(120, 35)
+        self.use_best_btn.setFont(QFont("Microsoft YaHei", 9, QFont.Weight.Bold))
+        self.use_best_btn.setStyleSheet("""
+            QPushButton {background-color: #9C27B0; color: white; border: none; border-radius: 6px;}
+            QPushButton:hover {background-color: #7B1FA2;}
+        """)
+        self.use_best_btn.clicked.connect(self.use_best_achievements)
+        
         title_layout.addWidget(self.confirm_btn)
         title_layout.addWidget(self.cancel_btn)
+        title_layout.addWidget(self.use_best_btn)  # 添加新按钮
 
         # 参数表单布局
         param_form_layout = QFormLayout()
@@ -641,6 +715,7 @@ class SnakeRLMainWindow(QMainWindow):
         self.gamma_edit.setFixedWidth(100)
         gamma_validator = QDoubleValidator(MIN_GAMMA, MAX_GAMMA, 2, self)
         gamma_validator.setNotation(QDoubleValidator.StandardNotation)
+        self.gamma_edit.setValidator(gamma_validator)
         self.gamma_edit.setFont(QFont("Microsoft YaHei", 7))
         param_form_layout.addRow(gamma_label, self.gamma_edit)
 
@@ -742,20 +817,96 @@ class SnakeRLMainWindow(QMainWindow):
         # 初始游戏状态
         self.state = self.game.reset()
 
+    # ---------- 新增：使用最优成果训练按钮逻辑 ----------
+    def use_best_achievements(self):
+        """加载最优成果（Q表+参数）并用于训练"""
+        try:
+            # 前置校验：检查最优文件是否存在
+            missing_files = []
+            if not os.path.exists(BEST_Q_TABLE_PATH):
+                missing_files.append("最优Q表文件")
+            if not os.path.exists(BEST_PARAMS_PATH):
+                missing_files.append("最优参数文件")
+            
+            if missing_files:
+                QMessageBox.warning(self, "提示", f"以下最优成果文件缺失：{', '.join(missing_files)}\n请先完成至少一次最优成果保存！")
+                return
+            
+            # 1. 加载最优Q表
+            with open(BEST_Q_TABLE_PATH, 'rb') as f:
+                best_q_table_dict = pickle.load(f)
+            self.agent.q_table = defaultdict(lambda: np.zeros(4), best_q_table_dict)
+            
+            # 2. 加载最优参数
+            with open(BEST_PARAMS_PATH, 'rb') as f:
+                best_params = pickle.load(f)
+            
+            # 校验参数完整性
+            required_params = ["alpha", "gamma", "epsilon"]
+            if not all(p in best_params for p in required_params):
+                QMessageBox.warning(self, "参数异常", "最优参数文件格式错误，缺少必要参数！")
+                return
+            
+            self.agent.alpha = best_params["alpha"]
+            self.agent.gamma = best_params["gamma"]
+            self.agent.epsilon = best_params["epsilon"]
+            
+            # 3. 同步更新界面输入框
+            self.alpha_edit.setText(f"{self.agent.alpha:.2f}")
+            self.gamma_edit.setText(f"{self.agent.gamma:.2f}")
+            self.epsilon_edit.setText(f"{self.agent.epsilon:.2f}")
+            
+            # 4. 更新原始参数缓存
+            self.original_params.update({
+                "alpha": self.agent.alpha,
+                "gamma": self.agent.gamma,
+                "epsilon": self.agent.epsilon
+            })
+            
+            # 5. 提示成功
+            exp_count = len(best_q_table_dict)
+            best_score = best_params.get("score", 0)
+            QMessageBox.information(self, "加载成功", 
+                                   f"""已加载最优成果并生效！
+最优得分：{best_score}
+Q表经验数：{exp_count}
+当前训练参数：
+α={self.agent.alpha:.2f}
+γ={self.agent.gamma:.2f}
+ε={self.agent.epsilon:.2f}
+
+后续训练将基于最优Q表和参数进行！""")
+            print(f"✅ 加载最优成果训练 | 得分：{best_score} | 经验数：{exp_count} | 参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
+            
+        except pickle.UnpicklingError:
+            QMessageBox.critical(self, "加载失败", "最优成果文件已损坏，无法加载！")
+            print("❌ 加载最优成果失败：文件损坏")
+        except Exception as e:
+            QMessageBox.critical(self, "加载失败", f"加载最优成果时出错：{str(e)}")
+            print(f"❌ 加载最优成果失败：{str(e)}")
+
     # ---------- 手动保存最优成果（新增） ----------
     def manual_save_best(self):
-        """手动将当前Q表保存为最优成果"""
+        """手动将当前Q表和参数保存为最优成果"""
         try:
             # 强制保存当前Q表为最优
             self.agent.best_score = self.game.score if self.game.score > self.agent.best_score else self.agent.best_score
             best_q_table_dict = dict(self.agent.q_table)
             with open(BEST_Q_TABLE_PATH, 'wb') as f:
                 pickle.dump(best_q_table_dict, f)
+            
+            # 新增：保存当前参数为最优参数
+            self.agent.save_best_params()
             self.agent.save_best_score()
             
+            # 更新界面显示的最优参数
+            self.best_alpha_value.setText(f"α={self.agent.best_params['alpha']:.2f}")
+            self.best_gamma_value.setText(f"γ={self.agent.best_params['gamma']:.2f}")
+            self.best_epsilon_value.setText(f"ε={self.agent.best_params['epsilon']:.2f}")
+            
             QMessageBox.information(self, "保存成功", 
-                                   f"已将当前成果保存为最优版本！\n当前最优得分：{self.agent.best_score}\nQ表经验数：{len(best_q_table_dict)}")
-            print(f"📝 手动保存最优成果 | 得分：{self.agent.best_score} | 经验数：{len(best_q_table_dict)}")
+                                   f"已将当前成果保存为最优版本！\n当前最优得分：{self.agent.best_score}\nQ表经验数：{len(best_q_table_dict)}\n最优参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
+            print(f"📝 手动保存最优成果 | 得分：{self.agent.best_score} | 经验数：{len(best_q_table_dict)} | 参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
         except Exception as e:
             QMessageBox.critical(self, "保存失败", f"保存最优成果时出错：{str(e)}")
             print(f"❌ 手动保存最优成果失败：{str(e)}")
@@ -814,11 +965,11 @@ class SnakeRLMainWindow(QMainWindow):
                 raise ValueError
             self.total_episodes = episodes
             self.original_params["episodes"] = episodes
-            self.progress_value.setText(f"{self.current_episode}/{episodes}")
         except ValueError:
             episodes = self.original_params["episodes"]
             self.episode_edit.setText(str(episodes))
-            self.progress_value.setText(f"{self.current_episode}/{episodes}")
+
+        QMessageBox.information(self, "参数生效", "所有参数已确认并生效！")
 
     def cancel_params(self):
         """取消参数修改，恢复原始值"""
@@ -829,133 +980,117 @@ class SnakeRLMainWindow(QMainWindow):
         self.epsilon_edit.setText(f"{self.original_params['epsilon']:.2f}")
         self.episode_edit.setText(str(self.original_params["episodes"]))
         
-        # 恢复进度显示
-        self.progress_value.setText(f"{self.current_episode}/{self.original_params['episodes']}")
+        # 恢复实际参数值
+        self.timer.setInterval(int(1000/self.original_params["fps"]))
+        self.agent.alpha = self.original_params["alpha"]
+        self.agent.gamma = self.original_params["gamma"]
+        self.agent.epsilon = self.original_params["epsilon"]
+        self.total_episodes = self.original_params["episodes"]
+        
+        QMessageBox.information(self, "参数重置", "所有参数已恢复为修改前的值！")
 
-    # ---------- 功能函数 ----------
+    # ---------- 训练控制 ----------
     def toggle_pause(self):
+        """暂停/继续训练"""
         self.paused = not self.paused
-        self.pause_btn.setText("开始" if self.paused else "暂停")
+        if self.paused:
+            self.pause_btn.setText("继续")
+            self.timer.stop()
+        else:
+            self.pause_btn.setText("暂停")
+            self.timer.start(int(1000/int(self.fps_edit.text())))
 
     def restart_training(self):
-        self.game.reset()
-        # 重启时保留最优Q表和最优得分，只重置当前训练的Q表
-        self.agent.q_table = defaultdict(lambda: np.zeros(4))
-        self.agent.alpha = DEFAULT_ALPHA
-        self.agent.gamma = DEFAULT_GAMMA
-        self.agent.epsilon = DEFAULT_EPSILON
-        if os.path.exists(Q_TABLE_PATH):
-            os.remove(Q_TABLE_PATH)
-            
-        self.current_episode = 0
-        self.best_score = self.agent.best_score  # 保留最优得分
-        self.paused = False
-        self.pause_btn.setText("暂停")
-        
-        # 重置参数为默认值
-        self.original_params = {
-            "fps": DEFAULT_FPS,
-            "alpha": DEFAULT_ALPHA,
-            "gamma": DEFAULT_GAMMA,
-            "epsilon": DEFAULT_EPSILON,
-            "episodes": DEFAULT_EPISODES
-        }
-        
-        # 恢复输入框
-        self.fps_edit.setText(str(DEFAULT_FPS))
-        self.alpha_edit.setText(f"{DEFAULT_ALPHA:.2f}")
-        self.gamma_edit.setText(f"{DEFAULT_GAMMA:.2f}")
-        self.epsilon_edit.setText(f"{DEFAULT_EPSILON:.2f}")
-        self.episode_edit.setText(str(DEFAULT_EPISODES))
-        
-        # 恢复定时器
-        self.timer.setInterval(int(1000/DEFAULT_FPS))
-        
-        # 清空折线图
-        self.auto_scroll_plot.clear_plot()
-        
-        self.update_status_labels()
-        QMessageBox.information(self, "重启成功", f"训练已重启！\n保留历史最优得分：{self.best_score}")
+        """重新开始训练"""
+        reply = QMessageBox.question(self, "确认", "是否要重新开始训练？当前进度将重置！",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.timer.stop()
+            self.current_episode = 0
+            self.game.reset()
+            self.agent.reset()
+            self.best_score = self.agent.best_score
+            self.best_score_value.setText(f"{self.best_score}")
+            self.current_score_value.setText("0")
+            self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
+            self.auto_scroll_plot.clear_plot()
+            # 恢复参数输入框默认值
+            self.fps_edit.setText(str(DEFAULT_FPS))
+            self.alpha_edit.setText(f"{DEFAULT_ALPHA:.2f}")
+            self.gamma_edit.setText(f"{DEFAULT_GAMMA:.2f}")
+            self.epsilon_edit.setText(f"{DEFAULT_EPSILON:.2f}")
+            self.episode_edit.setText(str(DEFAULT_EPISODES))
+            self.original_params = {
+                "fps": DEFAULT_FPS,
+                "alpha": DEFAULT_ALPHA,
+                "gamma": DEFAULT_GAMMA,
+                "epsilon": DEFAULT_EPSILON,
+                "episodes": DEFAULT_EPISODES
+            }
+            self.timer.setInterval(int(1000/DEFAULT_FPS))
+            self.paused = False
+            self.pause_btn.setText("暂停")
+            self.timer.start()
+            QMessageBox.information(self, "重置成功", "训练已重新开始！")
 
     def safe_exit(self):
-        """退出时自动保存当前Q表，保留最优成果"""
-        try:
+        """安全退出程序"""
+        reply = QMessageBox.question(self, "确认", "是否要退出程序？当前训练进度将保存！",
+                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            # 保存当前Q表
             self.agent.save_q_table()
-            print(f"🚪 退出程序 | 已保存当前Q表 | 最优得分：{self.agent.best_score}")
-        except:
-            pass
-        QApplication.quit()
+            pygame.quit()
+            sys.exit()
 
-    def update_status_labels(self):
-        """更新状态显示"""
-        self.current_score_value.setText(f"{self.game.score}")
-        self.best_score_value.setText(f"{self.agent.best_score}")  # 同步agent的最优得分
-        self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
-
+    # ---------- 游戏更新逻辑 ----------
     def update_game(self):
-        """游戏主循环（集成自动保存最优成果）"""
-        try:
-            current_fps = int(self.fps_edit.text()) if self.fps_edit.text() else self.original_params["fps"]
-        except ValueError:
-            current_fps = self.original_params["fps"]
+        """每帧更新游戏状态"""
+        if self.current_episode >= self.total_episodes:
+            self.timer.stop()
+            QMessageBox.information(self, "训练完成", f"已完成{self.total_episodes}轮训练！\n最优得分：{self.best_score}")
+            return
 
-        if not self.paused and self.current_episode < self.total_episodes:
-            action, action_type = self.agent.choose_action(self.state)
-            next_state, reward, game_over, eat_food, collision_reason = self.game.step(action)
+        if self.game.game_over:
+            # 保存最优成果
+            self.agent.save_best_q_table(self.game.score)
+            # 更新最优得分显示
+            if self.game.score > self.best_score:
+                self.best_score = self.game.score
+                self.best_score_value.setText(f"{self.best_score}")
+                # 更新最优参数显示
+                self.best_alpha_value.setText(f"α={self.agent.best_params['alpha']:.2f}")
+                self.best_gamma_value.setText(f"γ={self.agent.best_params['gamma']:.2f}")
+                self.best_epsilon_value.setText(f"ε={self.agent.best_params['epsilon']:.2f}")
+            
+            # 更新图表
+            self.auto_scroll_plot.update_data(self.current_episode, self.game.score)
+            
+            # 重置游戏
+            self.state = self.game.reset()
+            self.current_episode += 1
+            self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
+            self.current_score_value.setText("0")
+            return
 
-            if not game_over:
-                self.agent.update_q_table(self.state, action, reward, next_state)
-
-            # 更新当前得分显示
-            self.current_score_value.setText(f"{self.game.score}")
-
-            if game_over:
-                # 自动保存最优成果（核心逻辑）
-                self.agent.save_best_q_table(self.game.score)
-                
-                # 更新最优得分显示
-                self.best_score_value.setText(f"{self.agent.best_score}")
-                
-                # 增加蛇的出场编号
-                self.current_episode += 1
-                
-                # 更新折线图数据
-                self.auto_scroll_plot.update_data(self.current_episode, self.game.score)
-                
-                # 更新训练进度
-                self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
-                
-                # 动态调整探索率
-                if self.current_episode > self.total_episodes * 0.8:
-                    new_epsilon = max(MIN_EPSILON, self.agent.epsilon - 0.0001)
-                    self.agent.epsilon = new_epsilon
-                    self.epsilon_edit.setText(f"{new_epsilon:.2f}")
-                    self.original_params["epsilon"] = new_epsilon
-                
-                # 重置游戏状态
-                self.state = self.game.reset()
-
-            else:
-                self.state = next_state
-
+        # 选择动作
+        action, action_type = self.agent.choose_action(self.state)
+        # 执行动作
+        next_state, reward, game_over, eat_food, collision_reason = self.game.step(action)
+        # 更新Q表
+        self.agent.update_q_table(self.state, action, reward, next_state)
+        # 更新状态
+        self.state = next_state
+        # 更新显示
+        self.current_score_value.setText(f"{self.game.score}")
+        
         # 渲染游戏画面
         q_image = self.game.render()
         self.game_label.setPixmap(QPixmap.fromImage(q_image))
 
-    def closeEvent(self, event):
-        """关闭窗口时保存当前Q表，保留最优成果"""
-        try:
-            self.agent.save_q_table()
-            print(f"🔒 窗口关闭 | 已保存当前Q表 | 最优得分：{self.agent.best_score}")
-        except:
-            pass
-        event.accept()
-
 # ====================== 6. 程序入口 ======================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    font = QFont("Microsoft YaHei", 12)
-    app.setFont(font)
     window = SnakeRLMainWindow()
     window.show()
     sys.exit(app.exec_())
