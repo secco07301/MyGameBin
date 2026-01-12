@@ -10,7 +10,7 @@ import os
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLineEdit, QPushButton, QLabel, QGroupBox, QFormLayout,
-    QScrollBar, QSizePolicy
+    QScrollBar, QSizePolicy, QMessageBox
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect, QElapsedTimer
 from PyQt5.QtGui import QImage, QPixmap, QFont, QIntValidator, QDoubleValidator
@@ -56,28 +56,75 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 
+# Q表保存路径（区分普通版和最优版）
 Q_TABLE_PATH = "snake_q_table.pkl"
+BEST_Q_TABLE_PATH = "snake_best_q_table.pkl"
+# 最优得分记录文件
+BEST_SCORE_PATH = "best_score_record.txt"
 
 # 图表显示参数
 PLOT_VIEW_WIDTH = 50  # 每次显示50个数据点
 AUTO_SCROLL_DELAY = 3000  # 手动操作后恢复自动滚动的延迟（毫秒）
 
-# ====================== 2. 强化学习智能体 ======================
+# ====================== 2. 强化学习智能体（集成最优成果保存） ======================
 class QLearningAgent:
     def __init__(self):
         self.q_table = defaultdict(lambda: np.zeros(4))
         self.alpha = DEFAULT_ALPHA      
         self.gamma = DEFAULT_GAMMA      
         self.epsilon = DEFAULT_EPSILON  
+        # 初始化最优得分记录
+        self.best_score = self.load_best_score()
+        # 加载最新Q表（训练中使用）
         self.load_q_table()
+        # 加载最优Q表（初始时如果有则使用）
+        self.load_best_q_table()
 
     def choose_action(self, state):
-        if random.uniform(0, 1) < self.epsilon:
-            action = random.choice([0, 1, 2, 3])
-            return action, "探索"
+        """选择动作（集成安全移动逻辑）"""
+        # 先获取安全动作列表
+        safe_actions = self.get_safe_actions(state)
+        
+        # 如果有安全动作，只在安全动作中选择
+        if safe_actions:
+            if random.uniform(0, 1) < self.epsilon:
+                # 探索：从安全动作中随机选
+                action = random.choice(safe_actions)
+                return action, "探索(安全)"
+            else:
+                # 利用：从安全动作中选Q值最大的
+                safe_q_values = [self.q_table[state][a] for a in safe_actions]
+                max_q = max(safe_q_values)
+                best_actions = [a for a, q in zip(safe_actions, safe_q_values) if q == max_q]
+                action = random.choice(best_actions)
+                return action, "利用(安全)"
         else:
-            action = np.argmax(self.q_table[state])
-            return action, "利用"
+            # 无安全动作时，按原逻辑选择（避免死锁）
+            if random.uniform(0, 1) < self.epsilon:
+                action = random.choice([0, 1, 2, 3])
+                return action, "探索(危险)"
+            else:
+                action = np.argmax(self.q_table[state])
+                return action, "利用(危险)"
+
+    def get_safe_actions(self, state):
+        """安全移动核心函数：返回所有安全的动作"""
+        safe_actions = []
+        
+        # 解析状态中的障碍物信息
+        up_obstacle, down_obstacle, left_obstacle, right_obstacle = state[:4]
+        
+        # 检查每个方向是否安全（无墙壁/自身身体）
+        if not up_obstacle:
+            safe_actions.append(0)  # 上安全
+        if not down_obstacle:
+            safe_actions.append(1)  # 下安全
+        if not left_obstacle:
+            safe_actions.append(2)  # 左安全
+        if not right_obstacle:
+            safe_actions.append(3)  # 右安全
+            
+        return safe_actions
 
     def update_q_table(self, state, action, reward, next_state):
         current_q = self.q_table[state][action]
@@ -87,14 +134,14 @@ class QLearningAgent:
         return current_q, new_q
 
     def save_q_table(self):
-        """保存Q表到文件"""
+        """保存当前Q表（训练过程中常规保存）"""
         q_table_dict = dict(self.q_table)
         with open(Q_TABLE_PATH, 'wb') as f:
             pickle.dump(q_table_dict, f)
         return len(self.q_table)
 
     def load_q_table(self):
-        """从文件加载Q表"""
+        """加载当前Q表（训练中使用）"""
         if os.path.exists(Q_TABLE_PATH):
             with open(Q_TABLE_PATH, 'rb') as f:
                 q_table_dict = pickle.load(f)
@@ -102,14 +149,62 @@ class QLearningAgent:
             return len(self.q_table)
         return 0
 
+    def save_best_q_table(self, current_score):
+        """
+        保存最优强化学习成果（仅当当前得分超过历史最优时）
+        :param current_score: 当前轮次的得分
+        :return: 是否保存了新的最优成果
+        """
+        if current_score > self.best_score:
+            # 更新最优得分记录
+            self.best_score = current_score
+            # 保存最优Q表
+            best_q_table_dict = dict(self.q_table)
+            with open(BEST_Q_TABLE_PATH, 'wb') as f:
+                pickle.dump(best_q_table_dict, f)
+            # 保存最优得分记录（便于查看）
+            self.save_best_score()
+            # 打印日志
+            exp_count = len(self.q_table)
+            print(f"🎉 发现最优成果！得分：{self.best_score} | Q表经验数：{exp_count} | 已保存到 {BEST_Q_TABLE_PATH}")
+            return True
+        return False
+
+    def load_best_q_table(self):
+        """加载最优Q表（用于恢复最佳训练成果）"""
+        if os.path.exists(BEST_Q_TABLE_PATH):
+            with open(BEST_Q_TABLE_PATH, 'rb') as f:
+                best_q_table_dict = pickle.load(f)
+            # 最优Q表仅作为参考，训练仍使用当前Q表
+            print(f"📌 加载最优Q表 | 历史最优得分：{self.best_score} | 经验数：{len(best_q_table_dict)}")
+            return len(best_q_table_dict)
+        return 0
+
+    def save_best_score(self):
+        """保存最优得分到文件"""
+        with open(BEST_SCORE_PATH, 'w') as f:
+            f.write(f"{self.best_score}")
+
+    def load_best_score(self):
+        """从文件加载最优得分"""
+        if os.path.exists(BEST_SCORE_PATH):
+            with open(BEST_SCORE_PATH, 'r') as f:
+                try:
+                    return int(f.read().strip())
+                except:
+                    return 0
+        return 0
+
     def reset(self):
-        """重置Q表和参数"""
+        """重置Q表和参数（保留最优成果）"""
         self.q_table = defaultdict(lambda: np.zeros(4))
         self.alpha = DEFAULT_ALPHA
         self.gamma = DEFAULT_GAMMA
         self.epsilon = DEFAULT_EPSILON
+        # 重置时仅删除当前训练的Q表，保留最优Q表和最优得分记录
         if os.path.exists(Q_TABLE_PATH):
             os.remove(Q_TABLE_PATH)
+        # 不删除最优成果文件
         return 0
 
 # ====================== 3. 贪吃蛇游戏核心 ======================
@@ -126,7 +221,7 @@ class SnakeGame:
         self.score = 0
         self.game_over = False
         self.steps = 0
-        self.max_steps = 200
+        self.max_steps = 500  # 增加最大步数，给小蛇更多移动空间
         self.collision_reason = ""
         return self._get_state()
 
@@ -139,15 +234,21 @@ class SnakeGame:
                 return food_pos
 
     def _get_state(self):
+        """获取游戏状态（包含障碍物和食物位置信息）"""
         head_x, head_y = self.snake[0]
+        
+        # 检测各个方向的障碍物（墙壁/自身身体）
         up_obstacle = (head_y - BLOCK_SIZE < 0) or ((head_x, head_y - BLOCK_SIZE) in self.snake)
         down_obstacle = (head_y + BLOCK_SIZE >= GAME_HEIGHT) or ((head_x, head_y + BLOCK_SIZE) in self.snake)
         left_obstacle = (head_x - BLOCK_SIZE < 0) or ((head_x - BLOCK_SIZE, head_y) in self.snake)
         right_obstacle = (head_x + BLOCK_SIZE >= GAME_WIDTH) or ((head_x + BLOCK_SIZE, head_y) in self.snake)
+        
+        # 检测食物相对位置
         food_up = (self.food[1] < head_y)
         food_down = (self.food[1] > head_y)
         food_left = (self.food[0] < head_x)
         food_right = (self.food[0] > head_x)
+        
         return (up_obstacle, down_obstacle, left_obstacle, right_obstacle,
                 food_up, food_down, food_left, food_right)
 
@@ -162,9 +263,12 @@ class SnakeGame:
         return False
 
     def step(self, action):
+        """执行动作并返回新状态"""
+        # 动作映射：0-上, 1-下, 2-左, 3-右
         action_dirs = [(0, -BLOCK_SIZE), (0, BLOCK_SIZE), (-BLOCK_SIZE, 0), (BLOCK_SIZE, 0)]
         action_dir = action_dirs[action]
         
+        # 禁止直接反向移动（额外安全保障）
         if (self.direction == (0, -BLOCK_SIZE) and action_dir == (0, BLOCK_SIZE)) or \
            (self.direction == (0, BLOCK_SIZE) and action_dir == (0, -BLOCK_SIZE)) or \
            (self.direction == (-BLOCK_SIZE, 0) and action_dir == (BLOCK_SIZE, 0)) or \
@@ -178,26 +282,29 @@ class SnakeGame:
         reward = 0
         eat_food = False
 
+        # 吃到食物
         if new_head == self.food:
             self.score += 1
             reward = 10
             self.food = self._generate_food()
-            self.steps = 0
+            self.steps = 0  # 重置步数计数器
             eat_food = True
         else:
             self.snake.pop()
 
+        # 碰撞检测
         if self._check_collision():
             self.game_over = True
             reward = -10
         elif self.steps >= self.max_steps:
             self.game_over = True
             self.collision_reason = "步数超限"
-            reward = -10
+            reward = -5  # 降低步数超限的惩罚
 
         return self._get_state(), reward, self.game_over, eat_food, self.collision_reason
 
     def render(self):
+        """渲染游戏画面"""
         self.screen.fill(BLACK)
         for i, segment in enumerate(self.snake):
             color = BLUE if i == 0 else GREEN
@@ -368,17 +475,17 @@ class AutoScrollableScorePlot(QWidget):
         self.manual_scroll_timer.stop()
         self.init_plot()
 
-# ====================== 5. 主窗口 ======================
+# ====================== 5. 主窗口（集成最优成果保存逻辑） ======================
 class SnakeRLMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("强化学习贪吃蛇")
+        self.setWindowTitle("强化学习贪吃蛇（最优成果保存版）")
         self.setFixedSize(1200, 700)
 
         # 初始化核心组件
         self.game = SnakeGame()
         self.agent = QLearningAgent()
-        self.best_score = 0
+        self.best_score = self.agent.best_score  # 同步最优得分
         self.current_episode = 0  # 蛇的出场编号
         self.total_episodes = DEFAULT_EPISODES
         self.paused = False
@@ -544,6 +651,7 @@ class SnakeRLMainWindow(QMainWindow):
         self.epsilon_edit.setFixedWidth(100)
         epsilon_validator = QDoubleValidator(MIN_EPSILON, MAX_EPSILON, 2, self)
         epsilon_validator.setNotation(QDoubleValidator.StandardNotation)
+        self.epsilon_edit.setValidator(epsilon_validator)
         self.epsilon_edit.setFont(QFont("Microsoft YaHei", 7))
         param_form_layout.addRow(epsilon_label, self.epsilon_edit)
 
@@ -588,15 +696,15 @@ class SnakeRLMainWindow(QMainWindow):
         """)
         self.restart_btn.clicked.connect(self.restart_training)
 
-        # 保存强化学习成果按钮
-        self.save_btn = QPushButton("保存强化学习成果")
-        self.save_btn.setFixedSize(150, 45)
-        self.save_btn.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
-        self.save_btn.setStyleSheet("""
-            QPushButton {background-color: #8BC34A; color: white; border: none; border-radius: 8px; font-size: 11px;}
-            QPushButton:hover {background-color: #7CB342;}
+        # 保存最优强化学习成果按钮（新增）
+        self.save_best_btn = QPushButton("保存当前为最优成果")
+        self.save_best_btn.setFixedSize(150, 45)
+        self.save_best_btn.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
+        self.save_best_btn.setStyleSheet("""
+            QPushButton {background-color: #9C27B0; color: white; border: none; border-radius: 8px; font-size: 11px;}
+            QPushButton:hover {background-color: #7B1FA2;}
         """)
-        self.save_btn.clicked.connect(self.save_rl_results)
+        self.save_best_btn.clicked.connect(self.manual_save_best)
 
         self.exit_btn = QPushButton("退出")
         self.exit_btn.setFixedSize(110, 45)
@@ -609,7 +717,7 @@ class SnakeRLMainWindow(QMainWindow):
 
         btn_layout.addWidget(self.pause_btn)
         btn_layout.addWidget(self.restart_btn)
-        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.save_best_btn)
         btn_layout.addWidget(self.exit_btn)
 
         right_layout.addLayout(btn_layout)
@@ -634,14 +742,23 @@ class SnakeRLMainWindow(QMainWindow):
         # 初始游戏状态
         self.state = self.game.reset()
 
-    # ---------- 保存强化学习成果 ----------
-    def save_rl_results(self):
-        """手动保存Q表和训练成果"""
+    # ---------- 手动保存最优成果（新增） ----------
+    def manual_save_best(self):
+        """手动将当前Q表保存为最优成果"""
         try:
-            exp_count = self.agent.save_q_table()
-            print(f"成功保存强化学习成果 | Q表经验数：{exp_count} | 当前ε={self.agent.epsilon:.2f} | 最优得分={self.best_score}")
+            # 强制保存当前Q表为最优
+            self.agent.best_score = self.game.score if self.game.score > self.agent.best_score else self.agent.best_score
+            best_q_table_dict = dict(self.agent.q_table)
+            with open(BEST_Q_TABLE_PATH, 'wb') as f:
+                pickle.dump(best_q_table_dict, f)
+            self.agent.save_best_score()
+            
+            QMessageBox.information(self, "保存成功", 
+                                   f"已将当前成果保存为最优版本！\n当前最优得分：{self.agent.best_score}\nQ表经验数：{len(best_q_table_dict)}")
+            print(f"📝 手动保存最优成果 | 得分：{self.agent.best_score} | 经验数：{len(best_q_table_dict)}")
         except Exception as e:
-            print(f"保存失败：{str(e)}")
+            QMessageBox.critical(self, "保存失败", f"保存最优成果时出错：{str(e)}")
+            print(f"❌ 手动保存最优成果失败：{str(e)}")
 
     # ---------- 参数确认/取消 ----------
     def confirm_params(self):
@@ -722,9 +839,16 @@ class SnakeRLMainWindow(QMainWindow):
 
     def restart_training(self):
         self.game.reset()
-        self.agent.reset()
+        # 重启时保留最优Q表和最优得分，只重置当前训练的Q表
+        self.agent.q_table = defaultdict(lambda: np.zeros(4))
+        self.agent.alpha = DEFAULT_ALPHA
+        self.agent.gamma = DEFAULT_GAMMA
+        self.agent.epsilon = DEFAULT_EPSILON
+        if os.path.exists(Q_TABLE_PATH):
+            os.remove(Q_TABLE_PATH)
+            
         self.current_episode = 0
-        self.best_score = 0
+        self.best_score = self.agent.best_score  # 保留最优得分
         self.paused = False
         self.pause_btn.setText("暂停")
         
@@ -751,18 +875,25 @@ class SnakeRLMainWindow(QMainWindow):
         self.auto_scroll_plot.clear_plot()
         
         self.update_status_labels()
+        QMessageBox.information(self, "重启成功", f"训练已重启！\n保留历史最优得分：{self.best_score}")
 
     def safe_exit(self):
+        """退出时自动保存当前Q表，保留最优成果"""
+        try:
+            self.agent.save_q_table()
+            print(f"🚪 退出程序 | 已保存当前Q表 | 最优得分：{self.agent.best_score}")
+        except:
+            pass
         QApplication.quit()
 
     def update_status_labels(self):
         """更新状态显示"""
         self.current_score_value.setText(f"{self.game.score}")
-        self.best_score_value.setText(f"{self.best_score}")
+        self.best_score_value.setText(f"{self.agent.best_score}")  # 同步agent的最优得分
         self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
 
     def update_game(self):
-        """游戏主循环"""
+        """游戏主循环（集成自动保存最优成果）"""
         try:
             current_fps = int(self.fps_edit.text()) if self.fps_edit.text() else self.original_params["fps"]
         except ValueError:
@@ -779,10 +910,11 @@ class SnakeRLMainWindow(QMainWindow):
             self.current_score_value.setText(f"{self.game.score}")
 
             if game_over:
-                # 更新最优得分
-                if self.game.score > self.best_score:
-                    self.best_score = self.game.score
-                    self.best_score_value.setText(f"{self.best_score}")
+                # 自动保存最优成果（核心逻辑）
+                self.agent.save_best_q_table(self.game.score)
+                
+                # 更新最优得分显示
+                self.best_score_value.setText(f"{self.agent.best_score}")
                 
                 # 增加蛇的出场编号
                 self.current_episode += 1
@@ -811,6 +943,12 @@ class SnakeRLMainWindow(QMainWindow):
         self.game_label.setPixmap(QPixmap.fromImage(q_image))
 
     def closeEvent(self, event):
+        """关闭窗口时保存当前Q表，保留最优成果"""
+        try:
+            self.agent.save_q_table()
+            print(f"🔒 窗口关闭 | 已保存当前Q表 | 最优得分：{self.agent.best_score}")
+        except:
+            pass
         event.accept()
 
 # ====================== 6. 程序入口 ======================
