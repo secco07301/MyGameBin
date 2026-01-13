@@ -10,10 +10,10 @@ import os
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLineEdit, QPushButton, QLabel, QGroupBox, QFormLayout,
-    QScrollBar, QSizePolicy, QMessageBox
+    QScrollBar, QSizePolicy, QMessageBox, QFrame, QGridLayout
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect, QElapsedTimer
-from PyQt5.QtGui import QImage, QPixmap, QFont, QIntValidator, QDoubleValidator
+from PyQt5.QtGui import QImage, QPixmap, QFont, QIntValidator, QDoubleValidator, QColor, QPalette
 
 # Pygame 仅用于游戏渲染
 import pygame
@@ -49,12 +49,21 @@ MIN_EPSILON, MAX_EPSILON = 0.01, 1.0
 DEFAULT_EPISODES = 1000
 MIN_EPISODES, MAX_EPISODES = 100, 5000
 
-# 颜色定义
+# 颜色定义 - 现代化配色
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-GREEN = (0, 255, 0)
-BLUE = (0, 0, 255)
+RED = (255, 70, 90)  # 更鲜艳的红色
+GREEN = (70, 220, 120)  # 更鲜艳的绿色
+BLUE = (80, 150, 255)  # 更鲜艳的蓝色
+PURPLE = (160, 90, 255)  # 紫色用于蛇头
+
+# UI颜色方案
+PRIMARY_COLOR = "#2C3E50"  # 主色调
+SECONDARY_COLOR = "#34495E"  # 次色调
+ACCENT_COLOR = "#3498DB"  # 强调色
+SUCCESS_COLOR = "#2ECC71"  # 成功色
+WARNING_COLOR = "#E74C3C"  # 警告色
+LIGHT_BG = "#ECF0F1"  # 浅色背景
 
 # Q表保存路径（区分普通版和最优版）
 Q_TABLE_PATH = "snake_q_table.pkl"
@@ -343,9 +352,29 @@ class SnakeGame:
         """渲染游戏画面"""
         self.screen.fill(BLACK)
         for i, segment in enumerate(self.snake):
-            color = BLUE if i == 0 else GREEN
+            color = PURPLE if i == 0 else GREEN  # 蛇头用紫色，身体用绿色
             pygame.draw.rect(self.screen, color, (segment[0], segment[1], BLOCK_SIZE-1, BLOCK_SIZE-1))
+            # 给蛇头添加眼睛效果
+            if i == 0:
+                eye_size = BLOCK_SIZE // 5
+                # 根据方向绘制眼睛
+                if self.direction == (0, -BLOCK_SIZE):  # 向上
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + 5, segment[1] + 5, eye_size, eye_size))
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + BLOCK_SIZE - 10, segment[1] + 5, eye_size, eye_size))
+                elif self.direction == (0, BLOCK_SIZE):  # 向下
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + 5, segment[1] + BLOCK_SIZE - 10, eye_size, eye_size))
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + BLOCK_SIZE - 10, segment[1] + BLOCK_SIZE - 10, eye_size, eye_size))
+                elif self.direction == (-BLOCK_SIZE, 0):  # 向左
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + 5, segment[1] + 5, eye_size, eye_size))
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + 5, segment[1] + BLOCK_SIZE - 10, eye_size, eye_size))
+                elif self.direction == (BLOCK_SIZE, 0):  # 向右
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + BLOCK_SIZE - 10, segment[1] + 5, eye_size, eye_size))
+                    pygame.draw.rect(self.screen, WHITE, (segment[0] + BLOCK_SIZE - 10, segment[1] + BLOCK_SIZE - 10, eye_size, eye_size))
+        
+        # 绘制食物（带高光效果）
         pygame.draw.rect(self.screen, RED, (self.food[0], self.food[1], BLOCK_SIZE-1, BLOCK_SIZE-1))
+        # 添加食物高光
+        pygame.draw.rect(self.screen, (255, 200, 200), (self.food[0] + 3, self.food[1] + 3, BLOCK_SIZE//3, BLOCK_SIZE//3))
         
         frame = pygame.surfarray.array3d(self.screen)
         frame = np.transpose(frame, (1, 0, 2))
@@ -375,12 +404,32 @@ class AutoScrollableScorePlot(QWidget):
         self.manual_scroll_timer.timeout.connect(self.resume_auto_scroll)
         
         # 创建Figure和Canvas
-        self.fig = Figure(figsize=(6, 3.5), dpi=100)
+        self.fig = Figure(figsize=(6, 4), dpi=100, facecolor='#F5F7FA')  # 增加高度
         self.canvas = FigureCanvas(self.fig)
         self.ax = self.fig.add_subplot(111)
         
         # 创建水平滚动条
         self.scroll_bar = QScrollBar(Qt.Horizontal, self)
+        self.scroll_bar.setStyleSheet("""
+            QScrollBar:horizontal {
+                border: none;
+                background: #E0E0E0;
+                height: 12px;
+                border-radius: 6px;
+                margin: 5px 0px 5px 0px;  # 添加上下边距
+            }
+            QScrollBar::handle:horizontal {
+                background: #90A4AE;
+                border-radius: 6px;
+                min-width: 30px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #607D8B;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+        """)
         self.scroll_bar.valueChanged.connect(self.on_scroll)
         # 监听滚动条的鼠标按下/释放事件，判断是否手动操作
         self.scroll_bar.sliderPressed.connect(self.pause_auto_scroll)
@@ -396,14 +445,17 @@ class AutoScrollableScorePlot(QWidget):
     def init_plot(self):
         """初始化图表样式"""
         self.ax.clear()
-        self.ax.set_title('贪吃蛇训练得分趋势', fontsize=12, fontweight='bold')
-        self.ax.set_xlabel('蛇的出场编号', fontsize=10)
-        self.ax.set_ylabel('得分', fontsize=10)
-        self.ax.grid(True, alpha=0.3)
+        self.ax.set_facecolor('#F5F7FA')
+        self.ax.set_title('贪吃蛇训练得分趋势', fontsize=10, fontweight='bold', color=PRIMARY_COLOR, pad=15)
+        self.ax.set_xlabel('蛇的出场编号', fontsize=11, color=SECONDARY_COLOR, labelpad=10)
+        self.ax.set_ylabel('得分', fontsize=11, color=SECONDARY_COLOR, labelpad=10)
+        self.ax.grid(True, alpha=0.3, linestyle='--')
         self.ax.set_xlim(0, PLOT_VIEW_WIDTH)
         self.ax.set_ylim(0, 20)
         self.ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # x轴只显示整数
-        self.fig.tight_layout()
+        self.ax.tick_params(colors=SECONDARY_COLOR, labelsize=10)
+        # 调整图表布局，为坐标轴标签留出足够空间
+        self.fig.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)
         self.canvas.draw()
         
     def update_data(self, snake_id, score):
@@ -429,6 +481,7 @@ class AutoScrollableScorePlot(QWidget):
     def update_plot(self):
         """根据滚动位置更新图表显示"""
         self.ax.clear()
+        self.ax.set_facecolor('#F5F7FA')
         
         # 计算显示范围
         end_pos = self.scroll_pos + PLOT_VIEW_WIDTH
@@ -438,8 +491,8 @@ class AutoScrollableScorePlot(QWidget):
         # 绘制折线图
         if display_x and display_y:
             self.ax.plot(display_x, display_y, 
-                        color='#2196F3', linewidth=2, marker='o', markersize=4, 
-                        markerfacecolor='#FF9800', markeredgecolor='white', markeredgewidth=1)
+                        color=ACCENT_COLOR, linewidth=2, marker='o', markersize=4, 
+                        markerfacecolor=SUCCESS_COLOR, markeredgecolor='white', markeredgewidth=1)
             
             # 设置x轴范围
             self.ax.set_xlim(min(display_x) - 1 if display_x else 0, 
@@ -460,21 +513,23 @@ class AutoScrollableScorePlot(QWidget):
                     self.ax.annotate(f'最优: {global_max_score}', 
                                    xy=(global_max_id, global_max_score), 
                                    xytext=(global_max_id+2, global_max_score+1),
-                                   arrowprops=dict(arrowstyle='->', color='#4CAF50', lw=1.5),
-                                   fontsize=9, color='#4CAF50', fontweight='bold')
+                                   arrowprops=dict(arrowstyle='->', color=SUCCESS_COLOR, lw=1.5),
+                                   fontsize=10, color=SUCCESS_COLOR, fontweight='bold')
         
         else:
             self.ax.set_xlim(0, PLOT_VIEW_WIDTH)
             self.ax.set_ylim(0, 20)
         
         # 重置样式
-        self.ax.set_title('贪吃蛇训练得分趋势', fontsize=12, fontweight='bold')
-        self.ax.set_xlabel('蛇的出场编号', fontsize=10)
-        self.ax.set_ylabel('得分', fontsize=10)
-        self.ax.grid(True, alpha=0.3)
+        self.ax.set_title('贪吃蛇训练得分趋势', fontsize=13, fontweight='bold', color=PRIMARY_COLOR, pad=15)
+        self.ax.set_xlabel('蛇的出场编号', fontsize=11, color=SECONDARY_COLOR, labelpad=10)
+        self.ax.set_ylabel('得分', fontsize=11, color=SECONDARY_COLOR, labelpad=10)
+        self.ax.grid(True, alpha=0.3, linestyle='--')
         self.ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        self.ax.tick_params(colors=SECONDARY_COLOR, labelsize=10)
         
-        self.fig.tight_layout()
+        # 调整图表布局
+        self.fig.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)
         self.canvas.draw()
         
     def on_scroll(self, value):
@@ -511,12 +566,56 @@ class AutoScrollableScorePlot(QWidget):
         self.manual_scroll_timer.stop()
         self.init_plot()
 
-# ====================== 5. 主窗口（集成最优成果保存逻辑） ======================
+# ====================== 5. 主窗口（集成最优成果保存逻辑 + 测试学习成果） ======================
 class SnakeRLMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("强化学习贪吃蛇（最优成果保存版）")
-        self.setFixedSize(1200, 700)
+        self.setWindowTitle("🐍 强化学习贪吃蛇 - AI训练平台")
+        # 增大窗口尺寸，给所有组件更多空间
+        self.setFixedSize(1400, 1000)
+        
+        # 设置应用程序样式
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background-color: {LIGHT_BG};
+            }}
+            QLabel {{
+                color: {PRIMARY_COLOR};
+            }}
+            QGroupBox {{
+                font-weight: bold;
+                border: 2px solid {PRIMARY_COLOR};
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: white;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: {PRIMARY_COLOR};
+            }}
+            QLineEdit {{
+                border: 1px solid #B0BEC5;
+                border-radius: 4px;
+                padding: 5px;
+                background-color: white;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {ACCENT_COLOR};
+            }}
+            QPushButton {{
+                border: none;
+                border-radius: 6px;
+                padding: 8px;
+                font-weight: bold;
+            }}
+        """)
+
+        # 新增：测试模式标记
+        self.test_mode = False  # 是否处于测试模式
+        self.best_q_table = defaultdict(lambda: np.zeros(4))  # 存储最优Q表用于测试
 
         # 初始化核心组件
         self.game = SnakeGame()
@@ -542,266 +641,270 @@ class SnakeRLMainWindow(QMainWindow):
         main_layout.setContentsMargins(20, 20, 20, 20)
         self.setCentralWidget(main_widget)
 
-        # ========== 左侧：游戏显示区 + 状态信息 ==========
+        # ========== 左侧：游戏显示区 ==========
         left_widget = QWidget()
-        left_widget.setFixedSize(GAME_WIDTH, 600)
+        left_widget.setFixedWidth(GAME_WIDTH + 60)  # 稍微增加宽度
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setSpacing(10)
+        left_layout.setSpacing(15)
         left_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(left_widget)
 
-        # 状态信息栏 - 扩展：显示最优参数
-        status_bar_widget = QWidget()
-        status_bar_widget.setFixedHeight(80)  # 增高以容纳参数显示
-        status_bar_layout = QVBoxLayout(status_bar_widget)
-        status_bar_layout.setSpacing(5)
-        status_bar_layout.setContentsMargins(10, 0, 10, 0)
-        status_bar_layout.setAlignment(Qt.AlignCenter)
-
-        # 第一行：得分和进度
-        score_progress_layout = QHBoxLayout()
-        score_progress_layout.setSpacing(20)
-        score_progress_layout.setAlignment(Qt.AlignCenter)
-
-        # 当前得分
-        current_score_label = QLabel("当前得分：")
-        current_score_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-        self.current_score_value = QLabel(f"{self.game.score}")
-        self.current_score_value.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-        self.current_score_value.setStyleSheet("color: #4CAF50;")
-
-        # 最优得分
-        best_score_label = QLabel("最优得分：")
-        best_score_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-        self.best_score_value = QLabel(f"{self.best_score}")
-        self.best_score_value.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-        self.best_score_value.setStyleSheet("color: #FF9800;")
-
-        # 训练进度
-        progress_label = QLabel("训练进度：")
-        progress_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-        self.progress_value = QLabel(f"{self.current_episode}/{self.total_episodes}")
-        self.progress_value.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-        self.progress_value.setStyleSheet("color: #2196F3;")
-
-        score_progress_layout.addWidget(current_score_label)
-        score_progress_layout.addWidget(self.current_score_value)
-        score_progress_layout.addWidget(best_score_label)
-        score_progress_layout.addWidget(self.best_score_value)
-        score_progress_layout.addWidget(progress_label)
-        score_progress_layout.addWidget(self.progress_value)
-
-        # 第二行：最优参数显示
-        best_params_layout = QHBoxLayout()
-        best_params_layout.setSpacing(15)
-        best_params_layout.setAlignment(Qt.AlignCenter)
-
-        best_params_label = QLabel("最优参数：")
-        best_params_label.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
-        self.best_alpha_value = QLabel(f"α={self.agent.best_params['alpha']:.2f}")
-        self.best_alpha_value.setFont(QFont("Microsoft YaHei", 11))
-        self.best_gamma_value = QLabel(f"γ={self.agent.best_params['gamma']:.2f}")
-        self.best_gamma_value.setFont(QFont("Microsoft YaHei", 11))
-        self.best_epsilon_value = QLabel(f"ε={self.agent.best_params['epsilon']:.2f}")
-        self.best_epsilon_value.setFont(QFont("Microsoft YaHei", 11))
-
-        best_params_layout.addWidget(best_params_label)
-        best_params_layout.addWidget(self.best_alpha_value)
-        best_params_layout.addWidget(self.best_gamma_value)
-        best_params_layout.addWidget(self.best_epsilon_value)
-
-        # 添加到状态栏布局
-        status_bar_layout.addLayout(score_progress_layout)
-        status_bar_layout.addLayout(best_params_layout)
-
         # 游戏显示标签
         self.game_label = QLabel()
-        self.game_label.setFixedSize(GAME_WIDTH, GAME_HEIGHT)
-        self.game_label.setStyleSheet("border: 3px solid #333; background: black;")
+        self.game_label.setFixedSize(GAME_WIDTH + 20, GAME_HEIGHT + 20)
+        self.game_label.setStyleSheet(f"""
+            border: 2px solid {PRIMARY_COLOR};
+            border-radius: 10px;
+            background: black;
+            padding: 10px;
+        """)
+
+        # 游戏状态信息卡片 - 重新设计布局
+        status_card = QFrame()
+        status_card.setFixedHeight(240)  # 稍微增加高度
+        status_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: white;
+                border: 2px solid {PRIMARY_COLOR};
+                border-radius: 10px;
+                padding: 18px;
+            }}
+        """)
+
+        status_layout = QVBoxLayout(status_card)
+        status_layout.setSpacing(22)
+        status_layout.setContentsMargins(10, 10, 10, 10)
+
+        # 第一行：得分信息
+        score_row = QWidget()
+        score_layout = QHBoxLayout(score_row)
+        score_layout.setContentsMargins(0, 0, 0, 0)
+        score_layout.setSpacing(20) # 减少间距让框有更多空间
+        score_layout.setAlignment(Qt.AlignCenter)
+
+        # 当前得分（直接创建并保存引用）
+        current_score_widget = QWidget()
+        current_score_widget.setMinimumWidth(150)  # 增加10%（原130 → 143 → 取整145）
+        current_score_layout = QVBoxLayout(current_score_widget)
+        current_score_layout.setContentsMargins(14, 14, 14, 14)  # 增加内边距
+        current_score_layout.setSpacing(8)  # 稍微增加间距
+
+        current_score_title = QLabel("当前得分")
+        current_score_title.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
+        current_score_title.setStyleSheet(f"color: {SECONDARY_COLOR};")
+        current_score_title.setAlignment(Qt.AlignCenter)
+
+        self.current_score_value = QLabel(f"{self.game.score}")
+        self.current_score_value.setFont(QFont("Arial", 14,QFont.Weight.Bold))  # 减小5%（原20 → 19 → 取整18）
+        self.current_score_value.setStyleSheet(f"color: {ACCENT_COLOR};")
+        self.current_score_value.setAlignment(Qt.AlignCenter)
+
+        current_score_layout.addWidget(current_score_title)
+        current_score_layout.addWidget(self.current_score_value)
+
+        # 最优得分（直接创建并保存引用）
+        best_score_widget = QWidget()
+        best_score_widget.setMinimumWidth(150)  # 加10%（原130 → 143 → 取整145）
+        best_score_layout = QVBoxLayout(best_score_widget)
+        best_score_layout.setContentsMargins(14, 14, 14, 14)  # 增加内边距
+        best_score_layout.setSpacing(8)  # 稍微增加间距
+
+        best_score_title = QLabel("历史最优")
+        best_score_title.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
+        best_score_title.setStyleSheet(f"color: {SECONDARY_COLOR};")
+        best_score_title.setAlignment(Qt.AlignCenter)
+
+        self.best_score_value = QLabel(f"{self.best_score}")
+        self.best_score_value.setFont(QFont("Arial", 14,QFont.Weight.Bold))  # 减小5%（原20 → 19 → 取整18）
+        self.best_score_value.setStyleSheet(f"color: {SUCCESS_COLOR};")
+        self.best_score_value.setAlignment(Qt.AlignCenter)
+
+        best_score_layout.addWidget(best_score_title)
+        best_score_layout.addWidget(self.best_score_value)
+
+        # 训练进度（直接创建并保存引用）
+        progress_widget = QWidget()
+        progress_widget.setMinimumWidth(150)  # 增加10%（原155 → 170.5 → 取整175）
+        progress_layout = QVBoxLayout(progress_widget)
+        progress_layout.setContentsMargins(14, 14, 14, 14)  # 增加内边距
+        progress_layout.setSpacing(8)  # 稍微增加间距
+
+        progress_title = QLabel("训练进度")
+        progress_title.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
+        progress_title.setStyleSheet(f"color: {SECONDARY_COLOR};")
+        progress_title.setAlignment(Qt.AlignCenter)
+
+        self.progress_value = QLabel(f"{self.current_episode}/{self.total_episodes}")
+        self.progress_value.setFont(QFont("Arial", 14, QFont.Weight.Bold))  # 减小5%（原14 → 13.3 → 取整12）
+        self.progress_value.setStyleSheet(f"color: {WARNING_COLOR};")
+        self.progress_value.setAlignment(Qt.AlignCenter)
+
+        progress_layout.addWidget(progress_title)
+        progress_layout.addWidget(self.progress_value)
+
+        # 为每个信息框添加样式
+        for widget in [current_score_widget, best_score_widget, progress_widget]:
+            widget.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {LIGHT_BG};
+                    border-radius: 10px;
+                    border: 1px solid #D0D0D0;
+                }}
+            """)
+
+        score_layout.addWidget(current_score_widget)
+        score_layout.addWidget(best_score_widget)
+        score_layout.addWidget(progress_widget)
+        score_layout.setStretch(0, 1)
+        score_layout.setStretch(1, 1)
+        score_layout.setStretch(2, 1)
+        #score_layout.addStretch()
+        
+        # 第二行：最优参数
+        params_row = QWidget()
+        params_layout = QVBoxLayout(params_row)
+        params_layout.setContentsMargins(0, 0, 0, 0)
+        params_layout.setSpacing(20)  # 减少间距
+
+        best_params_title = QLabel("📊 最优参数记录")
+        best_params_title.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))  # 字体从11调整为10
+        best_params_title.setStyleSheet(f"color: {PRIMARY_COLOR}; background: transparent; padding: 4px 8px;")
+        best_params_title.setContentsMargins(0, 0, 0, 6)  # 底部留 6px 空隙，避免覆盖到徽章
+        #best_params_title.setStyleSheet(f"color: {PRIMARY_COLOR};")
+
+        best_params_container = QWidget()
+        best_params_container.setStyleSheet("background: transparent;")
+        best_params_container_layout = QHBoxLayout(best_params_container)
+        best_params_container_layout.setContentsMargins(0, 0, 0, 0)
+        best_params_container_layout.setSpacing(30)  # 减少间距
+        best_params_container_layout.setAlignment(Qt.AlignCenter)  # 居中展示徽章
+
+        self.best_alpha_value = self.create_param_badge(f"α={self.agent.best_params['alpha']:.2f}", "#E3F2FD", PRIMARY_COLOR)
+        self.best_gamma_value = self.create_param_badge(f"γ={self.agent.best_params['gamma']:.2f}", "#E8F5E9", PRIMARY_COLOR)
+        self.best_epsilon_value = self.create_param_badge(f"ε={self.agent.best_params['epsilon']:.2f}", "#FFF3E0", PRIMARY_COLOR)
+
+        best_params_container_layout.addWidget(self.best_alpha_value)
+        best_params_container_layout.addWidget(self.best_gamma_value)
+        best_params_container_layout.addWidget(self.best_epsilon_value)
+        #best_params_container_layout.addStretch()
+
+        params_layout.addWidget(best_params_title)
+        params_layout.addWidget(best_params_container)
+        
+        # 添加到状态卡片
+        status_layout.addWidget(score_row)
+        status_layout.addWidget(params_row)
+        status_layout.addStretch()
 
         # 添加到左侧布局
-        left_layout.addWidget(status_bar_widget)
         left_layout.addWidget(self.game_label)
+        left_layout.addWidget(status_card)
 
-        # ========== 右侧：控制面板 + 智能自动滑动折线图 ==========
+        # ========== 右侧：控制面板 ==========
         right_widget = QWidget()
-        right_widget.setFixedSize(650, 650)
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(20, 20, 20, 20)
         right_layout.setSpacing(20)
         main_layout.addWidget(right_widget)
 
         # ---------- 子布局1：参数调节组 ----------
-        param_group = QGroupBox()
-        param_group.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
+        param_group = QGroupBox("⚙️ 强化学习参数调节")
+        param_group.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
         
-        # 自定义标题栏
-        title_bar = QWidget()
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(10, 5, 10, 5)
-        title_layout.setSpacing(20)
+        param_layout = QVBoxLayout(param_group)
+        param_layout.setSpacing(15)
         
-        # 标题文字
-        title_label = QLabel("强化学习参数调节")
-        title_label.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
-        title_layout.addWidget(title_label)
-        
-        # 拉伸因子
-        title_layout.addStretch()
-        
-        # 确认/取消按钮
-        self.confirm_btn = QPushButton("确认修改")
-        self.confirm_btn.setFixedSize(90, 35)
-        self.confirm_btn.setFont(QFont("Microsoft YaHei", 9, QFont.Weight.Bold))
-        self.confirm_btn.setStyleSheet("""
-            QPushButton {background-color: #4CAF50; color: white; border: none; border-radius: 6px;}
-            QPushButton:hover {background-color: #388E3C;}
-        """)
-        self.confirm_btn.clicked.connect(self.confirm_params)
-        
-        self.cancel_btn = QPushButton("取消修改")
-        self.cancel_btn.setFixedSize(90, 35)
-        self.cancel_btn.setFont(QFont("Microsoft YaHei", 9, QFont.Weight.Bold))
-        self.cancel_btn.setStyleSheet("""
-            QPushButton {background-color: #FF5722; color: white; border: none; border-radius: 6px;}
-            QPushButton:hover {background-color: #E64A19;}
-        """)
-        self.cancel_btn.clicked.connect(self.cancel_params)
-        
-        # ========== 新增：使用最优成果训练按钮 ==========
-        self.use_best_btn = QPushButton("使用最优成果训练")
-        self.use_best_btn.setFixedSize(120, 35)
-        self.use_best_btn.setFont(QFont("Microsoft YaHei", 9, QFont.Weight.Bold))
-        self.use_best_btn.setStyleSheet("""
-            QPushButton {background-color: #9C27B0; color: white; border: none; border-radius: 6px;}
-            QPushButton:hover {background-color: #7B1FA2;}
-        """)
-        self.use_best_btn.clicked.connect(self.use_best_achievements)
-        
-        title_layout.addWidget(self.confirm_btn)
-        title_layout.addWidget(self.cancel_btn)
-        title_layout.addWidget(self.use_best_btn)  # 添加新按钮
-
         # 参数表单布局
         param_form_layout = QFormLayout()
-        param_form_layout.setSpacing(15)
-        param_form_layout.setContentsMargins(10, 5, 10, 10)
-
-        # 1. FPS参数行
-        fps_label = QLabel("运行速度(FPS) [1-60]:")
-        fps_label.setFont(QFont("Microsoft YaHei", 7))
-        self.fps_edit = QLineEdit(str(DEFAULT_FPS))
-        self.fps_edit.setFixedWidth(100)
-        fps_validator = QIntValidator(MIN_FPS, MAX_FPS, self)
-        self.fps_edit.setValidator(fps_validator)
-        self.fps_edit.setFont(QFont("Microsoft YaHei", 7))
-        param_form_layout.addRow(fps_label, self.fps_edit)
-
-        # 2. 学习率α参数行
-        alpha_label = QLabel("学习率α [0.01-1.0]:")
-        alpha_label.setFont(QFont("Microsoft YaHei", 7))
-        self.alpha_edit = QLineEdit(f"{DEFAULT_ALPHA:.2f}")
-        self.alpha_edit.setFixedWidth(100)
-        alpha_validator = QDoubleValidator(MIN_ALPHA, MAX_ALPHA, 2, self)
-        alpha_validator.setNotation(QDoubleValidator.StandardNotation)
-        self.alpha_edit.setValidator(alpha_validator)
-        self.alpha_edit.setFont(QFont("Microsoft YaHei", 7))
-        param_form_layout.addRow(alpha_label, self.alpha_edit)
-
-        # 3. 折扣因子γ参数行
-        gamma_label = QLabel("折扣因子γ [0.01-1.0]:")
-        gamma_label.setFont(QFont("Microsoft YaHei", 7))
-        self.gamma_edit = QLineEdit(f"{DEFAULT_GAMMA:.2f}")
-        self.gamma_edit.setFixedWidth(100)
-        gamma_validator = QDoubleValidator(MIN_GAMMA, MAX_GAMMA, 2, self)
-        gamma_validator.setNotation(QDoubleValidator.StandardNotation)
-        self.gamma_edit.setValidator(gamma_validator)
-        self.gamma_edit.setFont(QFont("Microsoft YaHei", 7))
-        param_form_layout.addRow(gamma_label, self.gamma_edit)
-
-        # 4. 探索率ε参数行
-        epsilon_label = QLabel("探索率ε [0.01-1.0]:")
-        epsilon_label.setFont(QFont("Microsoft YaHei", 7))
-        self.epsilon_edit = QLineEdit(f"{DEFAULT_EPSILON:.2f}")
-        self.epsilon_edit.setFixedWidth(100)
-        epsilon_validator = QDoubleValidator(MIN_EPSILON, MAX_EPSILON, 2, self)
-        epsilon_validator.setNotation(QDoubleValidator.StandardNotation)
-        self.epsilon_edit.setValidator(epsilon_validator)
-        self.epsilon_edit.setFont(QFont("Microsoft YaHei", 7))
-        param_form_layout.addRow(epsilon_label, self.epsilon_edit)
-
-        # 5. 训练轮次参数行
-        episode_label = QLabel("训练总轮次 [100-5000]:")
-        episode_label.setFont(QFont("Microsoft YaHei", 7))
-        self.episode_edit = QLineEdit(str(DEFAULT_EPISODES))
-        self.episode_edit.setFixedWidth(100)
-        episode_validator = QIntValidator(MIN_EPISODES, MAX_EPISODES, self)
-        self.episode_edit.setValidator(episode_validator)
-        self.episode_edit.setFont(QFont("Microsoft YaHei", 7))
-        param_form_layout.addRow(episode_label, self.episode_edit)
-
-        # 组合参数组的布局
-        param_group_layout = QVBoxLayout(param_group)
-        param_group_layout.setContentsMargins(0, 0, 0, 0)
-        param_group_layout.setSpacing(0)
-        param_group_layout.addWidget(title_bar)
-        param_group_layout.addLayout(param_form_layout)
-
+        param_form_layout.setSpacing(12)
+        param_form_layout.setLabelAlignment(Qt.AlignRight)
+        
+        # 创建参数行
+        params = [
+            ("运行速度(FPS) [1-60]:", "fps", str(DEFAULT_FPS), QIntValidator(MIN_FPS, MAX_FPS)),
+            ("学习率α [0.01-1.0]:", "alpha", f"{DEFAULT_ALPHA:.2f}", QDoubleValidator(MIN_ALPHA, MAX_ALPHA, 2)),
+            ("折扣因子γ [0.01-1.0]:", "gamma", f"{DEFAULT_GAMMA:.2f}", QDoubleValidator(MIN_GAMMA, MAX_GAMMA, 2)),
+            ("探索率ε [0.01-1.0]:", "epsilon", f"{DEFAULT_EPSILON:.2f}", QDoubleValidator(MIN_EPSILON, MAX_EPSILON, 2)),
+            ("训练总轮次 [100-5000]:", "episodes", str(DEFAULT_EPISODES), QIntValidator(MIN_EPISODES, MAX_EPISODES))
+        ]
+        
+        self.param_edits = {}
+        for label_text, param_name, default_value, validator in params:
+            label = QLabel(label_text)
+            label.setFont(QFont("Microsoft YaHei", 9))
+            edit = QLineEdit(default_value)
+            edit.setFixedWidth(120)
+            edit.setValidator(validator)
+            edit.setFont(QFont("Microsoft YaHei", 9))
+            edit.setStyleSheet("padding: 6px;")
+            self.param_edits[param_name] = edit
+            param_form_layout.addRow(label, edit)
+        
+        param_layout.addLayout(param_form_layout)
+        
+        # 参数操作按钮
+        param_buttons_layout = QHBoxLayout()
+        param_buttons_layout.setSpacing(15)
+        
+        self.confirm_btn = self.create_button("✅ 确认修改", ACCENT_COLOR, "#2980B9")
+        self.confirm_btn.clicked.connect(self.confirm_params)
+        
+        self.cancel_btn = self.create_button("❌ 取消修改", "#7F8C8D", "#95A5A6")
+        self.cancel_btn.clicked.connect(self.cancel_params)
+        
+        self.use_best_btn = self.create_button("🚀 使用最优成果训练", "#9B59B6", "#8E44AD")
+        self.use_best_btn.clicked.connect(self.use_best_achievements)
+        
+        param_buttons_layout.addWidget(self.confirm_btn)
+        param_buttons_layout.addWidget(self.cancel_btn)
+        param_buttons_layout.addWidget(self.use_best_btn)
+        param_buttons_layout.addStretch()
+        
+        param_layout.addLayout(param_buttons_layout)
+        
         right_layout.addWidget(param_group)
 
         # ---------- 子布局2：功能按钮组 ----------
-        btn_layout = QHBoxLayout()
+        btn_group = QGroupBox("🎮 控制面板")
+        btn_group.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
+        
+        btn_layout = QGridLayout(btn_group)
         btn_layout.setSpacing(15)
-
-        self.pause_btn = QPushButton("暂停")
-        self.pause_btn.setFixedSize(110, 45)
-        self.pause_btn.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
-        self.pause_btn.setStyleSheet("""
-            QPushButton {background-color: #2196F3; color: white; border: none; border-radius: 8px; font-size: 11px;}
-            QPushButton:hover {background-color: #1976D2;}
-        """)
+        btn_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # 创建按钮
+        self.pause_btn = self.create_button("⏸️ 暂停", ACCENT_COLOR, "#2980B9", height=50)
         self.pause_btn.clicked.connect(self.toggle_pause)
-
-        self.restart_btn = QPushButton("重新开始")
-        self.restart_btn.setFixedSize(110, 45)
-        self.restart_btn.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
-        self.restart_btn.setStyleSheet("""
-            QPushButton {background-color: #FF9800; color: white; border: none; border-radius: 8px; font-size: 11px;}
-            QPushButton:hover {background-color: #F57C00;}
-        """)
+        
+        self.restart_btn = self.create_button("🔄 重新开始", "#F39C12", "#E67E22", height=50)
         self.restart_btn.clicked.connect(self.restart_training)
-
-        # 保存最优强化学习成果按钮（新增）
-        self.save_best_btn = QPushButton("保存当前为最优成果")
-        self.save_best_btn.setFixedSize(150, 45)
-        self.save_best_btn.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
-        self.save_best_btn.setStyleSheet("""
-            QPushButton {background-color: #9C27B0; color: white; border: none; border-radius: 8px; font-size: 11px;}
-            QPushButton:hover {background-color: #7B1FA2;}
-        """)
+        
+        self.test_btn = self.create_button("🧪 测试学习成果", "#00BCD4", "#0097A7", height=50)
+        self.test_btn.clicked.connect(self.start_test_mode)
+        
+        self.save_best_btn = self.create_button("💾 保存最优成果", "#9B59B6", "#8E44AD", height=50)
         self.save_best_btn.clicked.connect(self.manual_save_best)
-
-        self.exit_btn = QPushButton("退出")
-        self.exit_btn.setFixedSize(110, 45)
-        self.exit_btn.setFont(QFont("Microsoft YaHei", 11, QFont.Weight.Bold))
-        self.exit_btn.setStyleSheet("""
-            QPushButton {background-color: #F44336; color: white; border: none; border-radius: 8px; font-size: 11px;}
-            QPushButton:hover {background-color: #D32F2F;}
-        """)
+        
+        self.exit_btn = self.create_button("🚪 安全退出", WARNING_COLOR, "#C0392B", height=50)
         self.exit_btn.clicked.connect(self.safe_exit)
-
-        btn_layout.addWidget(self.pause_btn)
-        btn_layout.addWidget(self.restart_btn)
-        btn_layout.addWidget(self.save_best_btn)
-        btn_layout.addWidget(self.exit_btn)
-
-        right_layout.addLayout(btn_layout)
+        
+        # 添加到网格布局（2行3列）
+        btn_layout.addWidget(self.pause_btn, 0, 0)
+        btn_layout.addWidget(self.restart_btn, 0, 1)
+        btn_layout.addWidget(self.test_btn, 0, 2)
+        btn_layout.addWidget(self.save_best_btn, 1, 0, 1, 2)
+        btn_layout.addWidget(self.exit_btn, 1, 2)
+        
+        # 设置列宽比例
+        for i in range(3):
+            btn_layout.setColumnStretch(i, 1)
+        
+        right_layout.addWidget(btn_group)
 
         # ---------- 子布局3：智能自动滑动折线图 ----------
-        plot_group = QGroupBox("得分趋势图")
-        plot_group.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
+        plot_group = QGroupBox("📈 训练得分趋势图")
+        plot_group.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
         plot_layout = QVBoxLayout(plot_group)
-        plot_layout.setContentsMargins(10, 10, 10, 10)
+        plot_layout.setContentsMargins(10, 15, 10, 15)  # 增加底部边距
         
         # 创建智能自动滑动折线图组件
         self.auto_scroll_plot = AutoScrollableScorePlot(self)
@@ -816,6 +919,85 @@ class SnakeRLMainWindow(QMainWindow):
 
         # 初始游戏状态
         self.state = self.game.reset()
+
+    def create_info_box(self, title, value, color, font_size):
+        """创建信息显示框"""
+        box = QFrame()
+        box.setStyleSheet(f"""
+            QFrame {{
+                background-color: {color}20;
+                border-radius: 8px;
+                padding: 10px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(box)
+        layout.setSpacing(5)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        title_label = QLabel(title)
+        title_label.setFont(QFont("Microsoft YaHei", 9, QFont.Weight.Bold))
+        title_label.setStyleSheet(f"color: {SECONDARY_COLOR};")
+        title_label.setAlignment(Qt.AlignCenter)
+        
+        value_label = QLabel(value)
+        value_label.setFont(QFont("Microsoft YaHei", font_size, QFont.Weight.Bold))
+        value_label.setStyleSheet(f"color: {color};")
+        value_label.setAlignment(Qt.AlignCenter)
+        
+        layout.addWidget(title_label)
+        layout.addWidget(value_label)
+        
+        return box
+
+    def create_param_badge(self, text, bg_color, text_color):
+        """创建参数徽章 — 更宽更高且可水平伸缩，避免被裁切"""
+        badge = QLabel(text)
+        # 字体使用跨平台稳定的字体，字号略大
+        badge.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        badge.setStyleSheet(f"""
+            QLabel {{
+                background-color: {bg_color};
+                color: {text_color};
+                padding: 8px 16px;            /* 更舒适的内边距 */
+                border-radius: 8px;
+                border: 1px solid {PRIMARY_COLOR}30;
+            }}
+        """)
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setMinimumHeight(28)                 # 增高，避免被垂直裁切
+        badge.setMinimumWidth(145)                 # 略宽一些
+        badge.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)  # 水平方向可伸缩以居中对齐
+        badge.setContentsMargins(0, 0, 0, 0)
+        return badge
+
+
+
+
+    def create_button(self, text, color, hover_color, width=None, height=40):
+        """创建统一风格的按钮"""
+        btn = QPushButton(text)
+        if width:
+            btn.setFixedWidth(width)
+        btn.setFixedHeight(height)
+        btn.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 15px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+            }}
+            QPushButton:pressed {{
+                background-color: {color};
+                padding: 9px 14px 7px 16px;
+            }}
+        """)
+        return btn
 
     # ---------- 新增：使用最优成果训练按钮逻辑 ----------
     def use_best_achievements(self):
@@ -852,238 +1034,311 @@ class SnakeRLMainWindow(QMainWindow):
             self.agent.epsilon = best_params["epsilon"]
             
             # 3. 同步更新界面输入框
-            self.alpha_edit.setText(f"{self.agent.alpha:.2f}")
-            self.gamma_edit.setText(f"{self.agent.gamma:.2f}")
-            self.epsilon_edit.setText(f"{self.agent.epsilon:.2f}")
+            self.param_edits["alpha"].setText(f"{self.agent.alpha:.2f}")
+            self.param_edits["gamma"].setText(f"{self.agent.gamma:.2f}")
+            self.param_edits["epsilon"].setText(f"{self.agent.epsilon:.2f}")
             
-            # 4. 更新原始参数缓存
-            self.original_params.update({
-                "alpha": self.agent.alpha,
-                "gamma": self.agent.gamma,
-                "epsilon": self.agent.epsilon
-            })
+            # 4. 更新最优参数显示
+            self.best_alpha_value.setText(f"α={self.agent.alpha:.2f}")
+            self.best_gamma_value.setText(f"γ={self.agent.gamma:.2f}")
+            self.best_epsilon_value.setText(f"ε={self.agent.epsilon:.2f}")
             
-            # 5. 提示成功
-            exp_count = len(best_q_table_dict)
-            best_score = best_params.get("score", 0)
-            QMessageBox.information(self, "加载成功", 
-                                   f"""已加载最优成果并生效！
-最优得分：{best_score}
-Q表经验数：{exp_count}
-当前训练参数：
-α={self.agent.alpha:.2f}
-γ={self.agent.gamma:.2f}
-ε={self.agent.epsilon:.2f}
-
-后续训练将基于最优Q表和参数进行！""")
-            print(f"✅ 加载最优成果训练 | 得分：{best_score} | 经验数：{exp_count} | 参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
+            # 5. 提示用户
+            QMessageBox.information(self, "成功", 
+                                  f"✅ 已加载最优成果！\n\n📊 Q表经验数：{len(self.agent.q_table)}\n⚙️ 最优参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
             
-        except pickle.UnpicklingError:
-            QMessageBox.critical(self, "加载失败", "最优成果文件已损坏，无法加载！")
-            print("❌ 加载最优成果失败：文件损坏")
         except Exception as e:
-            QMessageBox.critical(self, "加载失败", f"加载最优成果时出错：{str(e)}")
-            print(f"❌ 加载最优成果失败：{str(e)}")
+            QMessageBox.critical(self, "错误", f"加载最优成果失败：{str(e)}")
 
-    # ---------- 手动保存最优成果（新增） ----------
+    # ---------- 新增：测试学习成果按钮逻辑 ----------
+    def start_test_mode(self):
+        """启动测试模式：加载最优Q表，停止更新，重新开始游戏"""
+        # 校验最优Q表文件是否存在
+        if not os.path.exists(BEST_Q_TABLE_PATH):
+            QMessageBox.warning(self, "提示", "未找到最优Q表文件！请先完成至少一次最优成果保存。")
+            return
+        
+        # 加载最优Q表
+        with open(BEST_Q_TABLE_PATH, 'rb') as f:
+            best_q_table_dict = pickle.load(f)
+        self.best_q_table = defaultdict(lambda: np.zeros(4), best_q_table_dict)
+        
+        # 设置测试模式
+        self.test_mode = True
+        self.paused = False  # 确保测试时游戏不暂停
+        self.current_episode = 0  # 重置轮次显示
+        self.progress_value.setText(f"测试模式/{self.total_episodes}")  # 更新进度显示
+        self.test_btn.setText("🛑 停止测试")  # 按钮文字切换
+        self.test_btn.clicked.disconnect()
+        self.test_btn.clicked.connect(self.stop_test_mode)
+        
+        # 重新开始游戏
+        self.state = self.game.reset()
+        self.current_score_value.setText(f"{self.game.score}")
+        # 清空测试模式下的得分图表
+        self.auto_scroll_plot.clear_plot()
+        
+        QMessageBox.information(self, "测试模式", "🧪 已进入测试模式！\n\n小蛇将使用最优Q表循迹，Q表停止更新。")
+
+    def stop_test_mode(self):
+        """停止测试模式，恢复正常训练"""
+        self.test_mode = False
+        self.test_btn.setText("🧪 测试学习成果")
+        self.test_btn.clicked.disconnect()
+        self.test_btn.clicked.connect(self.start_test_mode)
+        self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
+        QMessageBox.information(self, "测试模式", "已退出测试模式，可恢复正常训练。")
+
+    def get_test_action(self, state):
+        """测试模式下：仅使用最优Q表选择安全动作"""
+        # 获取安全动作列表
+        safe_actions = self.agent.get_safe_actions(state)
+        if safe_actions:
+            # 仅利用最优Q表，不探索
+            safe_q_values = [self.best_q_table[state][a] for a in safe_actions]
+            max_q = max(safe_q_values)
+            best_actions = [a for a, q in zip(safe_actions, safe_q_values) if q == max_q]
+            action = random.choice(best_actions)
+            return action, "测试(最优Q表)"
+        else:
+            # 无安全动作时随机选
+            action = random.choice([0, 1, 2, 3])
+            return action, "测试(危险)"
+
+    # ---------- 手动保存最优成果按钮逻辑 ----------
     def manual_save_best(self):
-        """手动将当前Q表和参数保存为最优成果"""
+        """手动保存当前Q表和参数为最优成果"""
         try:
-            # 强制保存当前Q表为最优
-            self.agent.best_score = self.game.score if self.game.score > self.agent.best_score else self.agent.best_score
+            # 1. 保存当前Q表为最优Q表
             best_q_table_dict = dict(self.agent.q_table)
             with open(BEST_Q_TABLE_PATH, 'wb') as f:
                 pickle.dump(best_q_table_dict, f)
             
-            # 新增：保存当前参数为最优参数
-            self.agent.save_best_params()
-            self.agent.save_best_score()
+            # 2. 保存当前参数为最优参数
+            self.agent.best_params = {
+                "alpha": self.agent.alpha,
+                "gamma": self.agent.gamma,
+                "epsilon": self.agent.epsilon,
+                "score": self.game.score  # 记录当前得分
+            }
+            with open(BEST_PARAMS_PATH, 'wb') as f:
+                pickle.dump(self.agent.best_params, f)
             
-            # 更新界面显示的最优参数
-            self.best_alpha_value.setText(f"α={self.agent.best_params['alpha']:.2f}")
-            self.best_gamma_value.setText(f"γ={self.agent.best_params['gamma']:.2f}")
-            self.best_epsilon_value.setText(f"ε={self.agent.best_params['epsilon']:.2f}")
+            # 3. 更新最优得分（如果当前得分更高）
+            if self.game.score > self.agent.best_score:
+                self.agent.best_score = self.game.score
+                self.agent.save_best_score()
+                self.best_score_value.setText(f"{self.agent.best_score}")
             
-            QMessageBox.information(self, "保存成功", 
-                                   f"已将当前成果保存为最优版本！\n当前最优得分：{self.agent.best_score}\nQ表经验数：{len(best_q_table_dict)}\n最优参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
-            print(f"📝 手动保存最优成果 | 得分：{self.agent.best_score} | 经验数：{len(best_q_table_dict)} | 参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
+            # 4. 更新最优参数显示
+            self.best_alpha_value.setText(f"α={self.agent.alpha:.2f}")
+            self.best_gamma_value.setText(f"γ={self.agent.gamma:.2f}")
+            self.best_epsilon_value.setText(f"ε={self.agent.epsilon:.2f}")
+            
+            # 5. 提示用户
+            QMessageBox.information(self, "成功", 
+                                  f"💾 已手动保存当前成果为最优！\n\n📊 Q表经验数：{len(self.agent.q_table)}\n🏆 当前得分：{self.game.score}\n⚙️ 参数：α={self.agent.alpha:.2f}, γ={self.agent.gamma:.2f}, ε={self.agent.epsilon:.2f}")
+            
         except Exception as e:
-            QMessageBox.critical(self, "保存失败", f"保存最优成果时出错：{str(e)}")
-            print(f"❌ 手动保存最优成果失败：{str(e)}")
+            QMessageBox.critical(self, "错误", f"手动保存最优成果失败：{str(e)}")
 
-    # ---------- 参数确认/取消 ----------
+    # ---------- 参数修改确认/取消逻辑 ----------
     def confirm_params(self):
-        """确认参数修改并生效"""
-        # 1. 处理FPS
+        """确认修改参数"""
         try:
-            fps = int(self.fps_edit.text())
-            if not (MIN_FPS <= fps <= MAX_FPS):
-                raise ValueError
-            self.timer.setInterval(int(1000/fps))
-            self.original_params["fps"] = fps
-        except ValueError:
-            fps = self.original_params["fps"]
-            self.fps_edit.setText(str(fps))
-
-        # 2. 处理学习率α
-        try:
-            alpha = float(self.alpha_edit.text())
-            if not (MIN_ALPHA <= alpha <= MAX_ALPHA):
-                raise ValueError
-            self.agent.alpha = alpha
-            self.original_params["alpha"] = alpha
-        except ValueError:
-            alpha = self.original_params["alpha"]
-            self.alpha_edit.setText(f"{alpha:.2f}")
-
-        # 3. 处理折扣因子γ
-        try:
-            gamma = float(self.gamma_edit.text())
-            if not (MIN_GAMMA <= gamma <= MAX_GAMMA):
-                raise ValueError
-            self.agent.gamma = gamma
-            self.original_params["gamma"] = gamma
-        except ValueError:
-            gamma = self.original_params["gamma"]
-            self.gamma_edit.setText(f"{gamma:.2f}")
-
-        # 4. 处理探索率ε
-        try:
-            epsilon = float(self.epsilon_edit.text())
-            if not (MIN_EPSILON <= epsilon <= MAX_EPSILON):
-                raise ValueError
-            self.agent.epsilon = epsilon
-            self.original_params["epsilon"] = epsilon
-        except ValueError:
-            epsilon = self.original_params["epsilon"]
-            self.epsilon_edit.setText(f"{epsilon:.2f}")
-
-        # 5. 处理训练轮次
-        try:
-            episodes = int(self.episode_edit.text())
-            if not (MIN_EPISODES <= episodes <= MAX_EPISODES):
-                raise ValueError
-            self.total_episodes = episodes
-            self.original_params["episodes"] = episodes
-        except ValueError:
-            episodes = self.original_params["episodes"]
-            self.episode_edit.setText(str(episodes))
-
-        QMessageBox.information(self, "参数生效", "所有参数已确认并生效！")
+            # 1. 读取输入值
+            new_fps = int(self.param_edits["fps"].text())
+            new_alpha = float(self.param_edits["alpha"].text())
+            new_gamma = float(self.param_edits["gamma"].text())
+            new_epsilon = float(self.param_edits["epsilon"].text())
+            new_episodes = int(self.param_edits["episodes"].text())
+            
+            # 2. 校验范围（防止validator失效）
+            if not (MIN_FPS <= new_fps <= MAX_FPS):
+                raise ValueError(f"FPS必须在{MIN_FPS}-{MAX_FPS}之间")
+            if not (MIN_ALPHA <= new_alpha <= MAX_ALPHA):
+                raise ValueError(f"学习率α必须在{MIN_ALPHA}-{MAX_ALPHA}之间")
+            if not (MIN_GAMMA <= new_gamma <= MAX_GAMMA):
+                raise ValueError(f"折扣因子γ必须在{MIN_GAMMA}-{MAX_GAMMA}之间")
+            if not (MIN_EPSILON <= new_epsilon <= MAX_EPSILON):
+                raise ValueError(f"探索率ε必须在{MIN_EPSILON}-{MAX_EPSILON}之间")
+            if not (MIN_EPISODES <= new_episodes <= MAX_EPISODES):
+                raise ValueError(f"训练轮次必须在{MIN_EPISODES}-{MAX_EPISODES}之间")
+            
+            # 3. 更新参数
+            self.agent.alpha = new_alpha
+            self.agent.gamma = new_gamma
+            self.agent.epsilon = new_epsilon
+            self.total_episodes = new_episodes
+            
+            # 4. 更新定时器（FPS）
+            self.timer.setInterval(int(1000/new_fps))
+            
+            # 5. 保存新参数为原始值
+            self.original_params = {
+                "fps": new_fps,
+                "alpha": new_alpha,
+                "gamma": new_gamma,
+                "epsilon": new_epsilon,
+                "episodes": new_episodes
+            }
+            
+            # 6. 提示用户
+            QMessageBox.information(self, "参数更新成功", 
+                                  f"✅ 参数已更新！\n\n🎮 FPS: {new_fps}\n🧠 α: {new_alpha:.2f}\n🎯 γ: {new_gamma:.2f}\n🔍 ε: {new_epsilon:.2f}\n📈 训练轮次: {new_episodes}")
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "参数错误", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"更新参数失败：{str(e)}")
 
     def cancel_params(self):
-        """取消参数修改，恢复原始值"""
+        """取消修改参数，恢复原始值"""
         # 恢复输入框值
-        self.fps_edit.setText(str(self.original_params["fps"]))
-        self.alpha_edit.setText(f"{self.original_params['alpha']:.2f}")
-        self.gamma_edit.setText(f"{self.original_params['gamma']:.2f}")
-        self.epsilon_edit.setText(f"{self.original_params['epsilon']:.2f}")
-        self.episode_edit.setText(str(self.original_params["episodes"]))
+        self.param_edits["fps"].setText(str(self.original_params["fps"]))
+        self.param_edits["alpha"].setText(f"{self.original_params['alpha']:.2f}")
+        self.param_edits["gamma"].setText(f"{self.original_params['gamma']:.2f}")
+        self.param_edits["epsilon"].setText(f"{self.original_params['epsilon']:.2f}")
+        self.param_edits["episodes"].setText(str(self.original_params["episodes"]))
         
-        # 恢复实际参数值
-        self.timer.setInterval(int(1000/self.original_params["fps"]))
-        self.agent.alpha = self.original_params["alpha"]
-        self.agent.gamma = self.original_params["gamma"]
-        self.agent.epsilon = self.original_params["epsilon"]
-        self.total_episodes = self.original_params["episodes"]
-        
-        QMessageBox.information(self, "参数重置", "所有参数已恢复为修改前的值！")
+        # 提示用户
+        QMessageBox.information(self, "已取消", "参数已恢复为修改前的值")
 
-    # ---------- 训练控制 ----------
+    # ---------- 暂停/继续逻辑 ----------
     def toggle_pause(self):
         """暂停/继续训练"""
         self.paused = not self.paused
         if self.paused:
-            self.pause_btn.setText("继续")
-            self.timer.stop()
+            self.pause_btn.setText("▶️ 继续")
+            self.pause_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {SUCCESS_COLOR};
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 15px;
+                }}
+                QPushButton:hover {{
+                    background-color: #27AE60;
+                }}
+            """)
         else:
-            self.pause_btn.setText("暂停")
-            self.timer.start(int(1000/int(self.fps_edit.text())))
+            self.pause_btn.setText("⏸️ 暂停")
+            self.pause_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {ACCENT_COLOR};
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 15px;
+                }}
+                QPushButton:hover {{
+                    background-color: #2980B9;
+                }}
+            """)
 
+    # ---------- 重新开始训练逻辑 ----------
     def restart_training(self):
-        """重新开始训练"""
-        reply = QMessageBox.question(self, "确认", "是否要重新开始训练？当前进度将重置！",
-                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.timer.stop()
-            self.current_episode = 0
-            self.game.reset()
-            self.agent.reset()
-            self.best_score = self.agent.best_score
-            self.best_score_value.setText(f"{self.best_score}")
-            self.current_score_value.setText("0")
-            self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
-            self.auto_scroll_plot.clear_plot()
-            # 恢复参数输入框默认值
-            self.fps_edit.setText(str(DEFAULT_FPS))
-            self.alpha_edit.setText(f"{DEFAULT_ALPHA:.2f}")
-            self.gamma_edit.setText(f"{DEFAULT_GAMMA:.2f}")
-            self.epsilon_edit.setText(f"{DEFAULT_EPSILON:.2f}")
-            self.episode_edit.setText(str(DEFAULT_EPISODES))
-            self.original_params = {
-                "fps": DEFAULT_FPS,
-                "alpha": DEFAULT_ALPHA,
-                "gamma": DEFAULT_GAMMA,
-                "epsilon": DEFAULT_EPSILON,
-                "episodes": DEFAULT_EPISODES
-            }
-            self.timer.setInterval(int(1000/DEFAULT_FPS))
-            self.paused = False
-            self.pause_btn.setText("暂停")
-            self.timer.start()
-            QMessageBox.information(self, "重置成功", "训练已重新开始！")
+        """重新开始训练（重置游戏和轮次）"""
+        self.game.reset()
+        self.current_episode = 0
+        self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
+        self.current_score_value.setText(f"{self.game.score}")
+        self.auto_scroll_plot.clear_plot()
+        self.paused = False
+        self.pause_btn.setText("⏸️ 暂停")
+        self.pause_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ACCENT_COLOR};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 15px;
+            }}
+            QPushButton:hover {{
+                background-color: #2980B9;
+            }}
+        """)
+        QMessageBox.information(self, "重新开始", "🔄 已重置游戏，训练重新开始！")
 
+    # ---------- 安全退出逻辑 ----------
     def safe_exit(self):
-        """安全退出程序"""
-        reply = QMessageBox.question(self, "确认", "是否要退出程序？当前训练进度将保存！",
+        """安全退出（保存当前Q表）"""
+        reply = QMessageBox.question(self, "确认退出", 
+                                    "确定要退出程序吗？\n当前Q表将自动保存。",
                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        
         if reply == QMessageBox.Yes:
-            # 保存当前Q表
-            self.agent.save_q_table()
-            pygame.quit()
-            sys.exit()
+            try:
+                # 保存当前Q表
+                self.agent.save_q_table()
+                # 提示用户
+                QMessageBox.information(self, "退出", f"📊 已保存当前Q表（经验数：{len(self.agent.q_table)}），即将退出程序。")
+                # 退出程序
+                QApplication.quit()
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"保存Q表失败：{str(e)}\n程序将强制退出。")
+                QApplication.quit()
 
-    # ---------- 游戏更新逻辑 ----------
+    # ---------- 游戏更新逻辑（核心） ----------
     def update_game(self):
-        """每帧更新游戏状态"""
-        if self.current_episode >= self.total_episodes:
-            self.timer.stop()
-            QMessageBox.information(self, "训练完成", f"已完成{self.total_episodes}轮训练！\n最优得分：{self.best_score}")
-            return
-
-        if self.game.game_over:
-            # 保存最优成果
-            self.agent.save_best_q_table(self.game.score)
-            # 更新最优得分显示
-            if self.game.score > self.best_score:
-                self.best_score = self.game.score
+        if self.paused or self.game.game_over:
+            if self.game.game_over:
+                # 测试模式下游戏结束处理
+                if self.test_mode:
+                    # 测试模式不保存Q表，不更新最优成果
+                    self.auto_scroll_plot.update_data(self.current_episode, self.game.score)
+                    self.current_episode += 1
+                    self.progress_value.setText(f"测试模式/{self.total_episodes}")
+                    self.state = self.game.reset()
+                    return
+                # 正常训练模式下的游戏结束处理
+                self.auto_scroll_plot.update_data(self.current_episode, self.game.score)
+                # 保存最优成果
+                self.agent.save_best_q_table(self.game.score)
+                # 更新最优得分显示
+                self.best_score = self.agent.best_score
                 self.best_score_value.setText(f"{self.best_score}")
-                # 更新最优参数显示
-                self.best_alpha_value.setText(f"α={self.agent.best_params['alpha']:.2f}")
-                self.best_gamma_value.setText(f"γ={self.agent.best_params['gamma']:.2f}")
-                self.best_epsilon_value.setText(f"ε={self.agent.best_params['epsilon']:.2f}")
-            
-            # 更新图表
-            self.auto_scroll_plot.update_data(self.current_episode, self.game.score)
-            
-            # 重置游戏
-            self.state = self.game.reset()
-            self.current_episode += 1
-            self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
-            self.current_score_value.setText("0")
+                # 保存当前Q表
+                self.agent.save_q_table()
+                # 重置游戏
+                self.current_episode += 1
+                self.progress_value.setText(f"{self.current_episode}/{self.total_episodes}")
+                if self.current_episode >= self.total_episodes:
+                    QMessageBox.information(self, "训练完成", f"🎉 已完成{self.total_episodes}轮训练！")
+                    self.paused = True
+                    self.pause_btn.setText("▶️ 继续")
+                    self.pause_btn.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: {SUCCESS_COLOR};
+                            color: white;
+                            border: none;
+                            border-radius: 8px;
+                            padding: 8px 15px;
+                        }}
+                        QPushButton:hover {{
+                            background-color: #27AE60;
+                        }}
+                    """)
+                self.state = self.game.reset()
             return
 
-        # 选择动作
-        action, action_type = self.agent.choose_action(self.state)
+        # 选择动作：区分测试模式/训练模式
+        if self.test_mode:
+            action, _ = self.get_test_action(self.state)
+        else:
+            action, _ = self.agent.choose_action(self.state)
+        
         # 执行动作
         next_state, reward, game_over, eat_food, collision_reason = self.game.step(action)
-        # 更新Q表
-        self.agent.update_q_table(self.state, action, reward, next_state)
-        # 更新状态
-        self.state = next_state
-        # 更新显示
-        self.current_score_value.setText(f"{self.game.score}")
         
+        # 仅训练模式更新Q表，测试模式跳过
+        if not self.test_mode:
+            self.agent.update_q_table(self.state, action, reward, next_state)
+        
+        # 更新状态和显示
+        self.state = next_state
+        self.current_score_value.setText(f"{self.game.score}")
         # 渲染游戏画面
         q_image = self.game.render()
         self.game_label.setPixmap(QPixmap.fromImage(q_image))
@@ -1091,6 +1346,11 @@ Q表经验数：{exp_count}
 # ====================== 6. 程序入口 ======================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setStyle('Fusion')  # 使用Fusion样式，更现代化
+    
+    # 设置应用程序图标和字体
+    app.setFont(QFont("Microsoft YaHei", 9))
+    
     window = SnakeRLMainWindow()
     window.show()
     sys.exit(app.exec_())
