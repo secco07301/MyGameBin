@@ -42,11 +42,3 @@ def dfs(start, goal, snake, grid_w, grid_h, max_steps=800):
                 )
 
     return None
-
-def safe_move(head, snake, grid_w, grid_h):
-    snake_set = set(snake)
-    for dx, dy in [(1,0), (0,1), (-1,0), (0,-1)]:
-        nx, ny = head[0] + dx, head[1] + dy
-        if 0 <= nx < grid_w and 0 <= ny < grid_h and (nx, ny) not in snake_set:
-            return (nx, ny)
-    return None

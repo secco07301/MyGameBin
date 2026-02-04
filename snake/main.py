@@ -7,7 +7,7 @@ from multiprocessing import Process, Queue, Event, Value
 
 # 导入各类寻路算法
 from bfs import bfs, safe_move
-from dfs import dfs, safe_move as dfs_safe_move
+from dfs import dfs
 from A import a_star
 from dijkstra import dijkstra_snake_path
 from greedy import greedy_snake_path
@@ -79,7 +79,7 @@ def game_process_main(snake_queue, fruit_queue, stop_event, start_event, speed, 
             next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
         elif algorithm == "DFS":
             path = dfs(head, food, snake[:-1], GRID_W, GRID_H)
-            next_cell = dfs_safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
+            next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
         elif algorithm == "A*":
             path = a_star(head, food, snake[:-1], GRID_W, GRID_H)
             next_cell = safe_move(head, snake, GRID_W, GRID_H) if not path else path[0]
